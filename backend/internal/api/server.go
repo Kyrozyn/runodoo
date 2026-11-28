@@ -92,6 +92,8 @@ func (s *Server) Routes() http.Handler {
 
 	// System & Settings
 	protected.HandleFunc("GET /api/system/info", s.handleSystemInfo)
+	protected.HandleFunc("GET /api/system/benchmark", s.handleGetBenchmark)
+	protected.HandleFunc("POST /api/system/benchmark", s.handleRunBenchmark)
 	protected.HandleFunc("GET /api/system/versions", s.handleVersions)
 	protected.HandleFunc("GET /api/settings", s.handleGetSettings)
 	protected.HandleFunc("PUT /api/settings", s.handleUpdateSettings)
@@ -380,6 +382,27 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleVersions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, models.SupportedOdooVersions)
+}
+
+func (s *Server) handleGetBenchmark(w http.ResponseWriter, r *http.Request) {
+	st := s.store.Get()
+	writeJSON(w, http.StatusOK, map[string]any{"benchmark": st.DiskBenchmark})
+}
+
+func (s *Server) handleRunBenchmark(w http.ResponseWriter, r *http.Request) {
+	bench, err := system.RunDiskBenchmark(s.cfg.DataDir)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.store.Update(func(st *models.State) error {
+		st.DiskBenchmark = bench
+		return nil
+	}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"benchmark": bench})
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {

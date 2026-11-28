@@ -252,10 +252,21 @@ type MonitoringConfig struct {
 	AllowAnonymous          bool           `json:"allowAnonymous"`
 }
 
+// DiskBenchmark stores measured host disk throughput and IOPS for percentage limit templates.
+type DiskBenchmark struct {
+	ReadIOPS      int64     `json:"readIops"`
+	WriteIOPS     int64     `json:"writeIops"`
+	ReadMBps      int64     `json:"readMbps"`
+	WriteMBps     int64     `json:"writeMbps"`
+	BlockDevice   string    `json:"blockDevice"`
+	BenchmarkedAt time.Time `json:"benchmarkedAt"`
+}
+
 // State is the root persistent JSON document.
 type State struct {
 	Settings        PanelSettings        `json:"settings"`
 	SharedPostgres  SharedPostgresConfig `json:"sharedPostgres"`
+	DiskBenchmark   *DiskBenchmark       `json:"diskBenchmark,omitempty"`
 	Instances       []OdooInstance       `json:"instances"`
 	AddonRepos      []AddonRepo          `json:"addonRepos"`
 	Backups         []BackupRecord       `json:"backups"`

@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   Copy,
+  Cpu,
   Database,
   ExternalLink,
   FileCode,
@@ -32,7 +33,7 @@ import { ContainerTerminal } from '../components/ContainerTerminal'
 import { MonitoringTab } from '../components/MonitoringTab'
 import { ContainerLimitsCard } from '../components/ContainerLimitsCard'
 
-type Tab = 'overview' | 'domains' | 'databases' | 'addons' | 'python' | 'config' | 'monitoring' | 'logs' | 'terminal'
+type Tab = 'overview' | 'domains' | 'databases' | 'addons' | 'python' | 'config' | 'limits' | 'monitoring' | 'logs' | 'terminal'
 
 export function InstanceDetail({
   instanceId,
@@ -482,6 +483,7 @@ export function InstanceDetail({
     { id: 'addons', label: 'Addons', icon: <Puzzle className="h-4 w-4" /> },
     { id: 'python', label: 'Python Libs', icon: <Package className="h-4 w-4" /> },
     { id: 'config', label: 'odoo.conf', icon: <FileCode className="h-4 w-4" /> },
+    { id: 'limits', label: 'Resource Limits', icon: <Cpu className="h-4 w-4" /> },
     { id: 'monitoring', label: 'Monitoring', icon: <Activity className="h-4 w-4" /> },
     { id: 'logs', label: 'Logs', icon: <Terminal className="h-4 w-4" /> },
     { id: 'terminal', label: 'Terminal', icon: <Terminal className="h-4 w-4" /> },
@@ -871,8 +873,6 @@ export function InstanceDetail({
               <p className="text-sm text-slate-500">Start the container to view live CPU &amp; RAM metrics.</p>
             )}
           </div>
-
-          <ContainerLimitsCard instance={inst} onUpdated={loadInstance} notify={notify} />
         </div>
       )}
 
@@ -1990,6 +1990,10 @@ export function InstanceDetail({
             </pre>
           </div>
         </div>
+      )}
+
+      {tab === 'limits' && (
+        <ContainerLimitsCard instance={inst} onUpdated={loadInstance} notify={notify} />
       )}
 
       {tab === 'monitoring' && (

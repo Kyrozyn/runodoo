@@ -242,6 +242,15 @@ export interface SystemInfo {
   limitNotes?: string
 }
 
+export interface DiskBenchmark {
+  readIops: number
+  writeIops: number
+  readMbps: number
+  writeMbps: number
+  blockDevice: string
+  benchmarkedAt: string
+}
+
 export interface ContainerSummary {
   Id: string
   Names: string[]
