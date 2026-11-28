@@ -481,24 +481,52 @@ func readCgroupV2IOPS(containerID string) (rios, wios uint64) {
 		if err != nil {
 			continue
 		}
-		for _, line := range strings.Split(string(data), "\n") {
-			for _, field := range strings.Fields(line) {
-				if strings.HasPrefix(field, "rios=") {
-					if v, err := strconv.ParseUint(strings.TrimPrefix(field, "rios="), 10, 64); err == nil {
-						rios += v
-					}
-				} else if strings.HasPrefix(field, "wios=") {
-					if v, err := strconv.ParseUint(strings.TrimPrefix(field, "wios="), 10, 64); err == nil {
-						wios += v
-					}
-				}
-			}
-		}
-		if rios > 0 || wios > 0 {
+		if rios, wios = parseCgroupIOStat(string(data)); rios > 0 || wios > 0 {
 			return rios, wios
 		}
 	}
 	return 0, 0
+}
+
+// ReadContainerCgroupIOPS reads io.stat (cgroup v2) or blkio.throttle.io_serviced (cgroup v1)
+// from inside the target container when Docker stats omits io_serviced_recursive.
+func (c *Client) ReadContainerCgroupIOPS(ctx context.Context, idOrName string) (rios, wios uint64) {
+	out, code, err := c.Exec(ctx, idOrName, []string{
+		"sh", "-c", "cat /sys/fs/cgroup/io.stat 2>/dev/null || cat /sys/fs/cgroup/blkio/blkio.throttle.io_serviced 2>/dev/null",
+	}, nil)
+	if err != nil || code != 0 {
+		return 0, 0
+	}
+	return parseCgroupIOStat(out)
+}
+
+func parseCgroupIOStat(raw string) (rios, wios uint64) {
+	for _, line := range strings.Split(raw, "\n") {
+		fields := strings.Fields(line)
+		// cgroup v2 io.stat format: "8:0 rbytes=123 wbytes=456 rios=10 wios=20 ..."
+		for _, field := range fields {
+			if strings.HasPrefix(field, "rios=") {
+				if v, err := strconv.ParseUint(strings.TrimPrefix(field, "rios="), 10, 64); err == nil {
+					rios += v
+				}
+			} else if strings.HasPrefix(field, "wios=") {
+				if v, err := strconv.ParseUint(strings.TrimPrefix(field, "wios="), 10, 64); err == nil {
+					wios += v
+				}
+			}
+		}
+		// cgroup v1 blkio.throttle.io_serviced format: "8:0 Read 10" / "8:0 Write 20"
+		if len(fields) == 3 {
+			if v, err := strconv.ParseUint(fields[2], 10, 64); err == nil {
+				if strings.EqualFold(fields[1], "Read") {
+					rios += v
+				} else if strings.EqualFold(fields[1], "Write") {
+					wios += v
+				}
+			}
+		}
+	}
+	return rios, wios
 }
 
 // Exec runs a command inside a running container and returns combined output and exit code.
