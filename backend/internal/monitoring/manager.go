@@ -713,6 +713,8 @@ func (m *Manager) RenderMetrics(ctx context.Context, instanceFilter string) stri
 	sb.WriteString("# TYPE runodoo_container_disk_write_bytes_total counter\n")
 	sb.WriteString("# TYPE runodoo_container_disk_read_iops_total counter\n")
 	sb.WriteString("# TYPE runodoo_container_disk_write_iops_total counter\n")
+	sb.WriteString("# TYPE runodoo_pg_io_reads_total counter\n")
+	sb.WriteString("# TYPE runodoo_pg_io_writes_total counter\n")
 	sb.WriteString("# TYPE runodoo_odoo_http_up gauge\n")
 	sb.WriteString("# TYPE runodoo_odoo_http_response_seconds gauge\n")
 	sb.WriteString("# TYPE runodoo_odoo_workers_configured gauge\n")
@@ -775,6 +777,9 @@ func (m *Manager) RenderMetrics(ctx context.Context, instanceFilter string) stri
 					sb.WriteString(fmt.Sprintf("runodoo_container_disk_read_iops_total{instance=%q,container=%q,role=\"postgres\"} %d\n", inst.Name, inst.DBContainerName, stats.DiskReadOps))
 					sb.WriteString(fmt.Sprintf("runodoo_container_disk_write_iops_total{instance=%q,container=%q,role=\"postgres\"} %d\n", inst.Name, inst.DBContainerName, stats.DiskWriteOps))
 				}
+				pgReads, pgWrites := m.queryPGStatIO(ctx, inst)
+				sb.WriteString(fmt.Sprintf("runodoo_pg_io_reads_total{instance=%q,container=%q} %d\n", inst.Name, inst.DBContainerName, pgReads))
+				sb.WriteString(fmt.Sprintf("runodoo_pg_io_writes_total{instance=%q,container=%q} %d\n", inst.Name, inst.DBContainerName, pgWrites))
 			}
 		}
 
@@ -885,6 +890,24 @@ func (m *Manager) queryOdooDBMetrics(ctx context.Context, inst models.OdooInstan
 		res.idleInTxCount, _ = strconv.ParseInt(parts[14], 10, 64)
 	}
 	return res
+}
+
+func (m *Manager) queryPGStatIO(ctx context.Context, inst models.OdooInstance) (reads, writes int64) {
+	pgUser, pgPass := m.db.AdminCredsForInstance(inst)
+	// PostgreSQL 16+ exposes exact physical read/write/extend I/O counts in pg_stat_io.
+	query := `SELECT COALESCE(sum(reads), 0), COALESCE(sum(writes + extends), 0) FROM pg_stat_io;`
+	out, code, err := m.docker.Exec(ctx, inst.DBContainerName, []string{
+		"psql", "-U", pgUser, "-d", "postgres", "-At", "-F", "|", "-c", query,
+	}, []string{"PGPASSWORD=" + pgPass})
+	if err != nil || code != 0 {
+		return 0, 0
+	}
+	parts := strings.Split(strings.TrimSpace(out), "|")
+	if len(parts) >= 2 {
+		reads, _ = strconv.ParseInt(parts[0], 10, 64)
+		writes, _ = strconv.ParseInt(parts[1], 10, 64)
+	}
+	return reads, writes
 }
 
 func randomSecret(n int) string {
