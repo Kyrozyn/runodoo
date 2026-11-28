@@ -12,7 +12,14 @@ const EMPTY_LIMITS: ContainerLimits = {
   diskWriteMbps: 0,
 }
 
-const PCT_PRESETS = [10, 25, 50, 75, 100] as const
+const PCT_PRESETS = [10, 25, 50, 75, 90] as const
+
+function calcPctValue(maxTotal: number, pct: number, isFloat = false): number {
+  if (isFloat) {
+    return Math.max(0.1, Math.round(((maxTotal * pct) / 100) * 100) / 100)
+  }
+  return Math.max(1, Math.round((maxTotal * pct) / 100))
+}
 
 function MetricInputWithPresets({
   label,
@@ -37,13 +44,7 @@ function MetricInputWithPresets({
 }) {
   const applyPct = (pct: number) => {
     if (maxTotal <= 0) return
-    if (isFloat) {
-      const v = Math.max(0.1, Math.round((maxTotal * pct) / 100 * 100) / 100)
-      onChange(v)
-    } else {
-      const v = Math.max(1, Math.round((maxTotal * pct) / 100))
-      onChange(v)
-    }
+    onChange(calcPctValue(maxTotal, pct, isFloat))
   }
 
   return (
@@ -128,11 +129,81 @@ function LimitsFields({
   disabled?: boolean
   onChange: (next: ContainerLimits) => void
 }) {
+  const hasAnyMax =
+    (sysInfo && (sysInfo.cpuCores > 0 || sysInfo.totalRamMb > 0)) ||
+    (benchmark && (benchmark.readIops > 0 || benchmark.writeIops > 0 || benchmark.readMbps > 0 || benchmark.writeMbps > 0))
+
+  const isAllUnlim =
+    value.cpuCores === 0 &&
+    value.memoryMb === 0 &&
+    value.diskReadIops === 0 &&
+    value.diskWriteIops === 0 &&
+    value.diskReadMbps === 0 &&
+    value.diskWriteMbps === 0
+
+  const applyAllPct = (pct: number) => {
+    if (!hasAnyMax) return
+    onChange({
+      cpuCores: sysInfo && sysInfo.cpuCores > 0 ? calcPctValue(sysInfo.cpuCores, pct, true) : value.cpuCores,
+      memoryMb: sysInfo && sysInfo.totalRamMb > 0 ? calcPctValue(sysInfo.totalRamMb, pct) : value.memoryMb,
+      diskReadIops: benchmark && benchmark.readIops > 0 ? calcPctValue(benchmark.readIops, pct) : value.diskReadIops,
+      diskWriteIops: benchmark && benchmark.writeIops > 0 ? calcPctValue(benchmark.writeIops, pct) : value.diskWriteIops,
+      diskReadMbps: benchmark && benchmark.readMbps > 0 ? calcPctValue(benchmark.readMbps, pct) : value.diskReadMbps,
+      diskWriteMbps: benchmark && benchmark.writeMbps > 0 ? calcPctValue(benchmark.writeMbps, pct) : value.diskWriteMbps,
+    })
+  }
+
+  const isAllPct = (pct: number) => {
+    if (!hasAnyMax) return false
+    return (
+      (!sysInfo || sysInfo.cpuCores <= 0 || value.cpuCores === calcPctValue(sysInfo.cpuCores, pct, true)) &&
+      (!sysInfo || sysInfo.totalRamMb <= 0 || value.memoryMb === calcPctValue(sysInfo.totalRamMb, pct)) &&
+      (!benchmark || benchmark.readIops <= 0 || value.diskReadIops === calcPctValue(benchmark.readIops, pct)) &&
+      (!benchmark || benchmark.writeIops <= 0 || value.diskWriteIops === calcPctValue(benchmark.writeIops, pct)) &&
+      (!benchmark || benchmark.readMbps <= 0 || value.diskReadMbps === calcPctValue(benchmark.readMbps, pct)) &&
+      (!benchmark || benchmark.writeMbps <= 0 || value.diskWriteMbps === calcPctValue(benchmark.writeMbps, pct))
+    )
+  }
+
   return (
     <div className={`rounded-xl border border-slate-200 p-5 space-y-4 ${disabled ? 'bg-slate-50 opacity-70' : 'bg-white'}`}>
-      <div>
-        <div className="text-sm font-bold text-slate-900">{title}</div>
-        <div className="text-xs text-slate-500">{subtitle}</div>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-sm font-bold text-slate-900">{title}</div>
+          <div className="text-xs text-slate-500">{subtitle}</div>
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange({ ...EMPTY_LIMITS })}
+            className={`rounded-md border px-2 py-0.5 text-[11px] font-medium transition ${
+              isAllUnlim
+                ? 'border-slate-700 bg-slate-800 text-white'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            } disabled:opacity-40`}
+          >
+            Unlim
+          </button>
+          {PCT_PRESETS.map((pct) => {
+            const active = isAllPct(pct)
+            return (
+              <button
+                key={pct}
+                type="button"
+                disabled={disabled || !hasAnyMax}
+                onClick={() => applyAllPct(pct)}
+                className={`rounded-md border px-2 py-0.5 text-[11px] font-medium transition ${
+                  active
+                    ? 'border-purple-600 bg-purple-50 text-purple-700'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                } disabled:opacity-40`}
+              >
+                {pct}%
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
