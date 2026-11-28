@@ -141,7 +141,7 @@ function LimitsFields({
           value={value.cpuCores}
           maxTotal={sysInfo?.cpuCores || 0}
           unit="cores"
-          step="0.1"
+          step="0.01"
           isFloat
           disabled={disabled}
           onChange={(v) => onChange({ ...value, cpuCores: v })}
@@ -151,7 +151,7 @@ function LimitsFields({
           value={value.memoryMb}
           maxTotal={sysInfo?.totalRamMb || 0}
           unit="MB"
-          step="64"
+          step="1"
           disabled={disabled}
           onChange={(v) => onChange({ ...value, memoryMb: v })}
         />
