@@ -63,6 +63,7 @@ func New(filePath, defaultPassword, sharedPGContainer string) (*Store, error) {
 			LoginLockoutMinutes:   ps.Settings.LoginLockoutMinutes,
 		},
 		SharedPostgres:  ps.SharedPostgres,
+		DiskBenchmark:   ps.DiskBenchmark,
 		Instances:       ps.Instances,
 		AddonRepos:      ps.AddonRepos,
 		Backups:         ps.Backups,
@@ -246,6 +247,7 @@ type persistedSettings struct {
 type persistedState struct {
 	Settings        persistedSettings           `json:"settings"`
 	SharedPostgres  models.SharedPostgresConfig `json:"sharedPostgres"`
+	DiskBenchmark   *models.DiskBenchmark       `json:"diskBenchmark,omitempty"`
 	Instances       []models.OdooInstance       `json:"instances"`
 	AddonRepos      []models.AddonRepo          `json:"addonRepos"`
 	Backups         []models.BackupRecord       `json:"backups"`
@@ -273,6 +275,7 @@ func (s *Store) saveLocked() error {
 			LoginLockoutMinutes:   s.state.Settings.LoginLockoutMinutes,
 		},
 		SharedPostgres:  s.state.SharedPostgres,
+		DiskBenchmark:   s.state.DiskBenchmark,
 		Instances:       s.state.Instances,
 		AddonRepos:      s.state.AddonRepos,
 		Backups:         s.state.Backups,

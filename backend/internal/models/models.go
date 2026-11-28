@@ -42,14 +42,27 @@ type DomainConfig struct {
 	ForceHTTPS bool   `json:"forceHttps"`
 }
 
-// ResourceConfig holds Odoo worker and memory settings.
+// ContainerLimits defines Docker cgroup resource limits for a container (0 = unlimited).
+type ContainerLimits struct {
+	CPUCores      float64 `json:"cpuCores"`
+	MemoryMB      int64   `json:"memoryMb"`
+	DiskReadIOPS  int64   `json:"diskReadIops"`
+	DiskWriteIOPS int64   `json:"diskWriteIops"`
+	DiskReadMBps  int64   `json:"diskReadMbps"`
+	DiskWriteMBps int64   `json:"diskWriteMbps"`
+}
+
+// ResourceConfig holds Odoo worker, memory, and Docker container resource limits.
 type ResourceConfig struct {
-	Workers         int   `json:"workers"`
-	LimitMemorySoft int64 `json:"limitMemorySoft"`
-	LimitMemoryHard int64 `json:"limitMemoryHard"`
-	LimitTimeCPU    int   `json:"limitTimeCpu"`
-	LimitTimeReal   int   `json:"limitTimeReal"`
-	MaxCronThreads  int   `json:"maxCronThreads"`
+	Workers         int             `json:"workers"`
+	LimitMemorySoft int64           `json:"limitMemorySoft"`
+	LimitMemoryHard int64           `json:"limitMemoryHard"`
+	LimitTimeCPU    int             `json:"limitTimeCpu"`
+	LimitTimeReal   int             `json:"limitTimeReal"`
+	MaxCronThreads  int             `json:"maxCronThreads"`
+	OdooLimits      ContainerLimits `json:"odooLimits"`
+	DBLimits        ContainerLimits `json:"dbLimits"`
+	DiskDevice      string          `json:"diskDevice,omitempty"`
 }
 
 // OdooInstance represents a managed Odoo deployment.
@@ -239,10 +252,21 @@ type MonitoringConfig struct {
 	AllowAnonymous          bool           `json:"allowAnonymous"`
 }
 
+// DiskBenchmark stores measured host disk throughput and IOPS for percentage limit templates.
+type DiskBenchmark struct {
+	ReadIOPS      int64     `json:"readIops"`
+	WriteIOPS     int64     `json:"writeIops"`
+	ReadMBps      int64     `json:"readMbps"`
+	WriteMBps     int64     `json:"writeMbps"`
+	BlockDevice   string    `json:"blockDevice"`
+	BenchmarkedAt time.Time `json:"benchmarkedAt"`
+}
+
 // State is the root persistent JSON document.
 type State struct {
 	Settings        PanelSettings        `json:"settings"`
 	SharedPostgres  SharedPostgresConfig `json:"sharedPostgres"`
+	DiskBenchmark   *DiskBenchmark       `json:"diskBenchmark,omitempty"`
 	Instances       []OdooInstance       `json:"instances"`
 	AddonRepos      []AddonRepo          `json:"addonRepos"`
 	Backups         []BackupRecord       `json:"backups"`
@@ -264,4 +288,9 @@ type SystemInfo struct {
 	DockerConnected bool    `json:"dockerConnected"`
 	DockerVersion   string  `json:"dockerVersion"`
 	PanelPort       string  `json:"panelPort"`
+	BlockDevice     string  `json:"blockDevice,omitempty"`
+	CPULimitOK      bool    `json:"cpuLimitOk"`
+	MemoryLimitOK   bool    `json:"memoryLimitOk"`
+	DiskIOLimitOK   bool    `json:"diskIoLimitOk"`
+	LimitNotes      string  `json:"limitNotes,omitempty"`
 }

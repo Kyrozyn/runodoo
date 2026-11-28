@@ -6,8 +6,10 @@ import type {
   BackupSchedule,
   ContainerStats,
   ContainerSummary,
+  ContainerLimits,
   DatabaseInfo,
   DeployProgress,
+  DiskBenchmark,
   OdooInstance,
   OdooVersionInfo,
   PanelSettings,
@@ -181,6 +183,8 @@ export const api = {
 
   // System & Settings
   systemInfo: () => request<SystemInfo>('/api/system/info'),
+  getBenchmark: () => request<{ benchmark: DiskBenchmark | null }>('/api/system/benchmark'),
+  runBenchmark: () => request<{ benchmark: DiskBenchmark }>('/api/system/benchmark', { method: 'POST' }),
   versions: () => request<OdooVersionInfo[]>('/api/system/versions'),
   getSettings: () => request<PanelSettings>('/api/settings'),
   updateSettings: (payload: Partial<PanelSettings>) =>
@@ -219,6 +223,14 @@ export const api = {
       orderedKeys: string[]
       envVars: Record<string, string>
     }>(`/api/instances/${id}/conf`),
+  updateInstanceLimits: (
+    id: string,
+    payload: { odooLimits: ContainerLimits; dbLimits: ContainerLimits; diskDevice: string }
+  ) =>
+    request<OdooInstance>(`/api/instances/${id}/limits`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
   issueInstanceSsl: (id: string, domain: string, email?: string) =>
     request<{ ok: boolean; logs: string }>(`/api/instances/${id}/ssl`, {
       method: 'POST',

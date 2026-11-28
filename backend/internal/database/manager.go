@@ -141,8 +141,12 @@ func (m *Manager) CreateDedicatedPostgres(ctx context.Context, inst models.OdooI
 	}
 	hostPGData := filepath.Join(m.cfg.HostInstancesDir(), inst.Name, "pgdata")
 	sysInfo := system.CollectSystemInfo(m.cfg.DataDir, m.cfg.Port, true, "")
+	diskDev := strings.TrimSpace(inst.Resources.DiskDevice)
+	if diskDev == "" {
+		diskDev = sysInfo.BlockDevice
+	}
 
-	_, err := m.docker.CreateContainer(ctx, docker.CreateContainerSpec{
+	spec := docker.CreateContainerSpec{
 		Name:  inst.DBContainerName,
 		Image: image,
 		Cmd:   []string{"postgres"},
@@ -161,7 +165,11 @@ func (m *Manager) CreateDedicatedPostgres(ctx context.Context, inst models.OdooI
 		},
 		Network:       m.cfg.DockerNetwork,
 		RestartPolicy: "unless-stopped",
-	})
+	}
+	dl := inst.Resources.DBLimits
+	docker.ApplyContainerLimits(&spec, dl.CPUCores, dl.MemoryMB, dl.DiskReadIOPS, dl.DiskWriteIOPS, dl.DiskReadMBps, dl.DiskWriteMBps, diskDev)
+
+	_, err := m.docker.CreateContainer(ctx, spec)
 	if err != nil {
 		return err
 	}
@@ -728,6 +736,48 @@ func (m *Manager) RestartPostgres(ctx context.Context, inst models.OdooInstance)
 		if err := m.docker.RestartContainer(ctx, inst.DBContainerName, 15); err != nil {
 			return err
 		}
+	}
+	pgUser, _ := m.adminCredsForInstance(inst)
+	return m.waitPostgresReady(ctx, inst.DBContainerName, pgUser)
+}
+
+// ApplyDedicatedLimits updates CPU/RAM live or recreates a dedicated PostgreSQL container when disk I/O limits change.
+func (m *Manager) ApplyDedicatedLimits(ctx context.Context, inst models.OdooInstance, recreateForIO bool) error {
+	if inst.DBMode != models.DBModeDedicated {
+		return nil
+	}
+	dl := inst.Resources.DBLimits
+	if !recreateForIO {
+		return m.docker.UpdateContainerResources(ctx, inst.DBContainerName, int64(dl.CPUCores*1e9), dl.MemoryMB*1024*1024)
+	}
+	insp, err := m.docker.InspectContainer(ctx, inst.DBContainerName)
+	if err != nil {
+		return nil
+	}
+	_ = m.docker.StopContainer(ctx, inst.DBContainerName, 15)
+	if err := m.docker.RemoveContainer(ctx, inst.DBContainerName, true); err != nil {
+		return err
+	}
+	diskDev := strings.TrimSpace(inst.Resources.DiskDevice)
+	if diskDev == "" {
+		diskDev = system.DetectBlockDevice(m.cfg.DataDir)
+	}
+	spec := docker.CreateContainerSpec{
+		Name:          inst.DBContainerName,
+		Image:         insp.Config.Image,
+		Cmd:           []string{"postgres"},
+		Env:           insp.Config.Env,
+		Labels:        insp.Config.Labels,
+		Binds:         insp.HostConfig.Binds,
+		Network:       m.cfg.DockerNetwork,
+		RestartPolicy: "unless-stopped",
+	}
+	docker.ApplyContainerLimits(&spec, dl.CPUCores, dl.MemoryMB, dl.DiskReadIOPS, dl.DiskWriteIOPS, dl.DiskReadMBps, dl.DiskWriteMBps, diskDev)
+	if _, err := m.docker.CreateContainer(ctx, spec); err != nil {
+		return err
+	}
+	if err := m.docker.StartContainer(ctx, inst.DBContainerName); err != nil {
+		return err
 	}
 	pgUser, _ := m.adminCredsForInstance(inst)
 	return m.waitPostgresReady(ctx, inst.DBContainerName, pgUser)

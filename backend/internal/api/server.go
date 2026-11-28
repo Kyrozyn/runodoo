@@ -92,6 +92,8 @@ func (s *Server) Routes() http.Handler {
 
 	// System & Settings
 	protected.HandleFunc("GET /api/system/info", s.handleSystemInfo)
+	protected.HandleFunc("GET /api/system/benchmark", s.handleGetBenchmark)
+	protected.HandleFunc("POST /api/system/benchmark", s.handleRunBenchmark)
 	protected.HandleFunc("GET /api/system/versions", s.handleVersions)
 	protected.HandleFunc("GET /api/settings", s.handleGetSettings)
 	protected.HandleFunc("PUT /api/settings", s.handleUpdateSettings)
@@ -112,6 +114,7 @@ func (s *Server) Routes() http.Handler {
 	protected.HandleFunc("GET /api/instances/{id}/deploy-status", s.handleDeployStatus)
 	protected.HandleFunc("GET /api/instances/{id}/stats", s.handleInstanceStats)
 	protected.HandleFunc("GET /api/instances/{id}/conf", s.handleInstanceConf)
+	protected.HandleFunc("PUT /api/instances/{id}/limits", s.handleUpdateInstanceLimits)
 	protected.HandleFunc("POST /api/instances/{id}/ssl", s.handleInstanceSSL)
 	protected.HandleFunc("POST /api/instances/{id}/update-apps-list", s.handleUpdateAppsList)
 	protected.HandleFunc("POST /api/instances/{id}/clean-missing-modules", s.handleCleanMissingModules)
@@ -379,6 +382,27 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleVersions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, models.SupportedOdooVersions)
+}
+
+func (s *Server) handleGetBenchmark(w http.ResponseWriter, r *http.Request) {
+	st := s.store.Get()
+	writeJSON(w, http.StatusOK, map[string]any{"benchmark": st.DiskBenchmark})
+}
+
+func (s *Server) handleRunBenchmark(w http.ResponseWriter, r *http.Request) {
+	bench, err := system.RunDiskBenchmark(s.cfg.DataDir)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.store.Update(func(st *models.State) error {
+		st.DiskBenchmark = bench
+		return nil
+	}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"benchmark": bench})
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -803,6 +827,24 @@ func (s *Server) handleInstanceConf(w http.ResponseWriter, r *http.Request) {
 		"orderedKeys":   odoo.StandardOdooConfKeys,
 		"envVars":       inst.EnvVars,
 	})
+}
+
+func (s *Server) handleUpdateInstanceLimits(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		OdooLimits models.ContainerLimits `json:"odooLimits"`
+		DBLimits   models.ContainerLimits `json:"dbLimits"`
+		DiskDevice string                 `json:"diskDevice"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	inst, err := s.odoo.UpdateContainerLimits(r.Context(), r.PathValue("id"), body.OdooLimits, body.DBLimits, body.DiskDevice)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, inst)
 }
 
 func (s *Server) handleInstanceSSL(w http.ResponseWriter, r *http.Request) {

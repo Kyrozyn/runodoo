@@ -3,6 +3,7 @@ package system
 import (
 	"bufio"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ func CollectSystemInfo(dataDir, panelPort string, dockerConnected bool, dockerVe
 	totalRAM, availRAM := detectRAM()
 	diskTotal, diskFree := detectDisk(dataDir)
 
+	cpuOK, memOK, ioOK, limitNotes := DetectCgroupCapabilities(dataDir)
 	return models.SystemInfo{
 		Hostname:        hostname,
 		OSPretty:        osPretty,
@@ -31,6 +33,11 @@ func CollectSystemInfo(dataDir, panelPort string, dockerConnected bool, dockerVe
 		DockerConnected: dockerConnected,
 		DockerVersion:   dockerVersion,
 		PanelPort:       panelPort,
+		BlockDevice:     DetectBlockDevice(dataDir),
+		CPULimitOK:      cpuOK,
+		MemoryLimitOK:   memOK,
+		DiskIOLimitOK:   ioOK,
+		LimitNotes:      limitNotes,
 	}
 }
 
@@ -163,4 +170,101 @@ func detectDisk(path string) (totalGB float64, freeGB float64) {
 	total := float64(stat.Blocks) * float64(stat.Bsize) / (1024 * 1024 * 1024)
 	free := float64(stat.Bavail) * float64(stat.Bsize) / (1024 * 1024 * 1024)
 	return float64(int(total*10)) / 10, float64(int(free*10)) / 10
+}
+
+// DetectBlockDevice resolves the parent host block device (e.g. /dev/vda, /dev/sda, /dev/nvme0n1)
+// backing targetPath by inspecting /proc/mounts.
+func DetectBlockDevice(targetPath string) string {
+	f, err := os.Open("/proc/mounts")
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	absTarget, err := filepath.Abs(targetPath)
+	if err != nil {
+		absTarget = targetPath
+	}
+
+	bestMount := ""
+	bestDev := ""
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) < 2 {
+			continue
+		}
+		dev, mnt := fields[0], fields[1]
+		if !strings.HasPrefix(dev, "/dev/") {
+			continue
+		}
+		if absTarget == mnt || mnt == "/" || strings.HasPrefix(absTarget, strings.TrimSuffix(mnt, "/")+"/") {
+			if len(mnt) > len(bestMount) {
+				bestMount = mnt
+				bestDev = dev
+			}
+		}
+	}
+	return parentBlockDevice(bestDev)
+}
+
+func parentBlockDevice(dev string) string {
+	if dev == "" {
+		return ""
+	}
+	// /dev/nvme0n1p1 -> /dev/nvme0n1, /dev/mmcblk0p1 -> /dev/mmcblk0
+	if strings.Contains(dev, "nvme") || strings.Contains(dev, "mmcblk") {
+		if idx := strings.LastIndexByte(dev, 'p'); idx > 0 {
+			suffix := dev[idx+1:]
+			if _, err := strconv.Atoi(suffix); err == nil {
+				return dev[:idx]
+			}
+		}
+		return dev
+	}
+	// /dev/sda1 -> /dev/sda, /dev/vda1 -> /dev/vda
+	return strings.TrimRight(dev, "0123456789")
+}
+
+// DetectCgroupCapabilities checks whether the host Linux kernel exposes cpu, memory, and io/blkio cgroup controllers.
+func DetectCgroupCapabilities(dataDir string) (cpuOK, memOK, ioOK bool, note string) {
+	var missing []string
+
+	// cgroup v2 unified hierarchy
+	if data, err := os.ReadFile("/sys/fs/cgroup/cgroup.controllers"); err == nil {
+		fields := strings.Fields(string(data))
+		has := map[string]bool{}
+		for _, f := range fields {
+			has[f] = true
+		}
+		cpuOK = has["cpu"]
+		memOK = has["memory"]
+		ioOK = has["io"]
+	} else {
+		// Fallback to cgroup v1 hierarchy
+		_, errCPU := os.Stat("/sys/fs/cgroup/cpu")
+		_, errMem := os.Stat("/sys/fs/cgroup/memory")
+		_, errBlk := os.Stat("/sys/fs/cgroup/blkio")
+		cpuOK = errCPU == nil
+		memOK = errMem == nil
+		ioOK = errBlk == nil
+	}
+
+	if !cpuOK {
+		missing = append(missing, "cpu cgroup controller unavailable")
+	}
+	if !memOK {
+		missing = append(missing, "memory cgroup controller unavailable")
+	}
+	dev := DetectBlockDevice(dataDir)
+	if !ioOK {
+		missing = append(missing, "io/blkio cgroup controller unavailable (Disk IOPS limits not supported by host kernel)")
+	} else if dev == "" {
+		ioOK = false
+		missing = append(missing, "host block device could not be auto-detected from /proc/mounts")
+	}
+	if len(missing) > 0 {
+		note = strings.Join(missing, "; ")
+	}
+	return cpuOK, memOK, ioOK, note
 }

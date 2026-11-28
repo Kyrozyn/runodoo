@@ -111,18 +111,28 @@ type ContainerStats struct {
 	DiskWriteOps   uint64  `json:"diskWriteOps"`
 }
 
+type DeviceThrottle struct {
+	Path string `json:"Path"`
+	Rate int64  `json:"Rate"`
+}
+
 type CreateContainerSpec struct {
-	Name          string
-	Image         string
-	Cmd           []string
-	Env           []string
-	Labels        map[string]string
-	Binds         []string
-	PortMappings  map[string]string // containerPort/tcp -> hostPort (e.g. "8069/tcp": "8069")
-	Network       string
-	RestartPolicy string // "unless-stopped", "no", "always"
-	AutoRemove    bool
-	MemoryLimit   int64  // bytes, optional
+	Name                 string
+	Image                string
+	Cmd                  []string
+	Env                  []string
+	Labels               map[string]string
+	Binds                []string
+	PortMappings         map[string]string // containerPort/tcp -> hostPort (e.g. "8069/tcp": "8069")
+	Network              string
+	RestartPolicy        string // "unless-stopped", "no", "always"
+	AutoRemove           bool
+	MemoryLimit          int64 // bytes, optional
+	NanoCPUs             int64 // 1e9 = 1 CPU core, optional
+	BlkioDeviceReadIOps  []DeviceThrottle
+	BlkioDeviceWriteIOps []DeviceThrottle
+	BlkioDeviceReadBps   []DeviceThrottle
+	BlkioDeviceWriteBps  []DeviceThrottle
 }
 
 // Ping checks Docker daemon connectivity.
@@ -286,6 +296,21 @@ func (c *Client) CreateContainer(ctx context.Context, spec CreateContainerSpec) 
 	if spec.MemoryLimit > 0 {
 		hostConfig["Memory"] = spec.MemoryLimit
 	}
+	if spec.NanoCPUs > 0 {
+		hostConfig["NanoCpus"] = spec.NanoCPUs
+	}
+	if len(spec.BlkioDeviceReadIOps) > 0 {
+		hostConfig["BlkioDeviceReadIOps"] = spec.BlkioDeviceReadIOps
+	}
+	if len(spec.BlkioDeviceWriteIOps) > 0 {
+		hostConfig["BlkioDeviceWriteIOps"] = spec.BlkioDeviceWriteIOps
+	}
+	if len(spec.BlkioDeviceReadBps) > 0 {
+		hostConfig["BlkioDeviceReadBps"] = spec.BlkioDeviceReadBps
+	}
+	if len(spec.BlkioDeviceWriteBps) > 0 {
+		hostConfig["BlkioDeviceWriteBps"] = spec.BlkioDeviceWriteBps
+	}
 
 	body := map[string]any{
 		"Image":        spec.Image,
@@ -338,6 +363,45 @@ func (c *Client) RestartContainer(ctx context.Context, idOrName string, timeoutS
 		timeoutSec = 15
 	}
 	return c.doEmpty(ctx, http.MethodPost, fmt.Sprintf("/containers/%s/restart?t=%d", url.PathEscape(idOrName), timeoutSec))
+}
+
+// UpdateContainerResources live-updates CPU (NanoCpus) and Memory limits on an existing container.
+func (c *Client) UpdateContainerResources(ctx context.Context, idOrName string, nanoCPUs, memoryBytes int64) error {
+	payload := map[string]any{
+		"NanoCpus": nanoCPUs,
+		"Memory":   memoryBytes,
+	}
+	if memoryBytes > 0 {
+		payload["MemorySwap"] = memoryBytes * 2
+	} else {
+		payload["MemorySwap"] = 0
+	}
+	return c.doJSON(ctx, http.MethodPost, fmt.Sprintf("/containers/%s/update", url.PathEscape(idOrName)), payload, nil)
+}
+
+// ApplyContainerLimits populates CPU, RAM, and disk I/O throttling fields on a CreateContainerSpec.
+func ApplyContainerLimits(spec *CreateContainerSpec, cpuCores float64, memoryMB, readIOPS, writeIOPS, readMBps, writeMBps int64, diskDevice string) {
+	if cpuCores > 0 {
+		spec.NanoCPUs = int64(cpuCores * 1e9)
+	}
+	if memoryMB > 0 {
+		spec.MemoryLimit = memoryMB * 1024 * 1024
+	}
+	if diskDevice == "" {
+		return
+	}
+	if readIOPS > 0 {
+		spec.BlkioDeviceReadIOps = []DeviceThrottle{{Path: diskDevice, Rate: readIOPS}}
+	}
+	if writeIOPS > 0 {
+		spec.BlkioDeviceWriteIOps = []DeviceThrottle{{Path: diskDevice, Rate: writeIOPS}}
+	}
+	if readMBps > 0 {
+		spec.BlkioDeviceReadBps = []DeviceThrottle{{Path: diskDevice, Rate: readMBps * 1024 * 1024}}
+	}
+	if writeMBps > 0 {
+		spec.BlkioDeviceWriteBps = []DeviceThrottle{{Path: diskDevice, Rate: writeMBps * 1024 * 1024}}
+	}
 }
 
 // RemoveContainer deletes a container (optionally force-removing running containers).
