@@ -494,12 +494,12 @@ func postgresqlDashboardJSON(instanceName string) string {
     {
       "id": 21,
       "type": "timeseries",
-      "title": "PostgreSQL Container Disk IOPS (Read/Write)",
+      "title": "PostgreSQL Disk IOPS (pg_stat_io Read/Write)",
       "gridPos": { "x": 12, "y": 59, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "runodoo-prom" },
       "targets": [
-        { "expr": "rate(runodoo_container_disk_read_iops_total{role=\"postgres\"}[1m])", "legendFormat": "{{container}} - Read IOPS", "refId": "A" },
-        { "expr": "rate(runodoo_container_disk_write_iops_total{role=\"postgres\"}[1m])", "legendFormat": "{{container}} - Write IOPS", "refId": "B" }
+        { "expr": "rate(runodoo_pg_io_reads_total{instance=\"$instance\"}[1m])", "legendFormat": "{{container}} - Read IOPS", "refId": "A" },
+        { "expr": "rate(runodoo_pg_io_writes_total{instance=\"$instance\"}[1m])", "legendFormat": "{{container}} - Write IOPS", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "unit": "iops" } }
     }

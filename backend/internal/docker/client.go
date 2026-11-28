@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -380,6 +382,7 @@ func (c *Client) ContainerLogs(ctx context.Context, idOrName string, tail int) (
 // ContainerStats fetches a single snapshot of container CPU and RAM usage.
 func (c *Client) ContainerStats(ctx context.Context, idOrName string) (*ContainerStats, error) {
 	var raw struct {
+		ID       string `json:"id"`
 		CPUStats struct {
 			CPUUsage struct {
 				TotalUsage uint64 `json:"total_usage"`
@@ -446,11 +449,14 @@ func (c *Client) ContainerStats(ctx context.Context, idOrName string) (*Containe
 		}
 	}
 	for _, entry := range raw.BlkioStats.IOServicedRecursive {
-		if strings.EqualFold(entry.Op, "read") {
+		if strings.EqualFold(entry.Op, "read") || strings.EqualFold(entry.Op, "rios") {
 			diskReadOps += entry.Value
-		} else if strings.EqualFold(entry.Op, "write") {
+		} else if strings.EqualFold(entry.Op, "write") || strings.EqualFold(entry.Op, "wios") {
 			diskWriteOps += entry.Value
 		}
+	}
+	if diskReadOps == 0 && diskWriteOps == 0 && raw.ID != "" {
+		diskReadOps, diskWriteOps = readCgroupV2IOPS(raw.ID)
 	}
 
 	return &ContainerStats{
@@ -463,6 +469,36 @@ func (c *Client) ContainerStats(ctx context.Context, idOrName string) (*Containe
 		DiskReadOps:    diskReadOps,
 		DiskWriteOps:   diskWriteOps,
 	}, nil
+}
+
+func readCgroupV2IOPS(containerID string) (rios, wios uint64) {
+	candidates := []string{
+		"/sys/fs/cgroup/system.slice/docker-" + containerID + ".scope/io.stat",
+		"/sys/fs/cgroup/docker/" + containerID + "/io.stat",
+	}
+	for _, p := range candidates {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			for _, field := range strings.Fields(line) {
+				if strings.HasPrefix(field, "rios=") {
+					if v, err := strconv.ParseUint(strings.TrimPrefix(field, "rios="), 10, 64); err == nil {
+						rios += v
+					}
+				} else if strings.HasPrefix(field, "wios=") {
+					if v, err := strconv.ParseUint(strings.TrimPrefix(field, "wios="), 10, 64); err == nil {
+						wios += v
+					}
+				}
+			}
+		}
+		if rios > 0 || wios > 0 {
+			return rios, wios
+		}
+	}
+	return 0, 0
 }
 
 // Exec runs a command inside a running container and returns combined output and exit code.
