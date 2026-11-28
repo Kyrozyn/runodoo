@@ -133,7 +133,7 @@ export function MonitoringTab({
   }
 
   const handleControl = async (
-    target: 'prometheus' | 'grafana' | 'pg_exporter' | 'all',
+    target: 'prometheus' | 'grafana' | 'pg_exporter' | 'loki' | 'all',
     action: 'start' | 'stop' | 'restart'
   ) => {
     setBusy(`${target}:${action}`)
@@ -289,9 +289,10 @@ export function MonitoringTab({
             <p className="text-xs text-slate-500 mt-0.5">
               Menginstall stack khusus untuk <strong>{instance.name}</strong> (
               <code className="bg-slate-100 px-1 rounded">runodoo-prom-{instance.name}</code>,{' '}
-              <code className="bg-slate-100 px-1 rounded">runodoo-grafana-{instance.name}</code>, dan{' '}
-              <code className="bg-slate-100 px-1 rounded">runodoo-pgexp-{instance.name}</code>) dengan 2 dashboard otomatis:
-              <strong> Odoo Apps Monitoring</strong> &amp; <strong>PostgreSQL Database Monitoring</strong>.
+              <code className="bg-slate-100 px-1 rounded">runodoo-grafana-{instance.name}</code>,{' '}
+              <code className="bg-slate-100 px-1 rounded">runodoo-loki-{instance.name}</code>, dan{' '}
+              <code className="bg-slate-100 px-1 rounded">runodoo-pgexp-{instance.name}</code>) dengan 3 dashboard otomatis:
+              <strong> Odoo Apps</strong>, <strong>PostgreSQL</strong>, &amp; <strong>Odoo/PostgreSQL Logs</strong>.
             </p>
           </div>
         </div>
@@ -391,6 +392,9 @@ export function MonitoringTab({
   const pgDashUrl = grafanaBase
     ? `${grafanaBase}/d/runodoo-postgresql?var-instance=${encodeURIComponent(instance.name)}`
     : ''
+  const logsDashUrl = grafanaBase
+    ? `${grafanaBase}/d/runodoo-logs`
+    : ''
 
   return (
     <div className="space-y-4">
@@ -424,10 +428,11 @@ export function MonitoringTab({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
             {[
               { key: 'grafana' as const, label: 'Grafana', st: status!.grafanaStatus },
               { key: 'prometheus' as const, label: 'Prometheus', st: status!.prometheusStatus },
+              { key: 'loki' as const, label: 'Loki (Logs)', st: status!.lokiStatus },
               { key: 'pg_exporter' as const, label: 'PG Exporter', st: status!.pgExporterStatus },
             ].map((item) => (
               <div key={item.key} className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 space-y-2">
@@ -485,6 +490,14 @@ export function MonitoringTab({
                 className="inline-flex items-center gap-1.5 rounded-lg border border-[#714B67]/40 bg-purple-50 px-3.5 py-2 text-xs font-semibold text-[#714B67] hover:bg-purple-100"
               >
                 <ExternalLink className="h-3.5 w-3.5" /> Open PostgreSQL Dashboard ({instance.name})
+              </a>
+              <a
+                href={logsDashUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> Open Logs Dashboard (Loki)
               </a>
             </div>
           ) : (

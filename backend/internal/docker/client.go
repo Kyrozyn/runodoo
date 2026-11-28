@@ -443,6 +443,28 @@ func (c *Client) ContainerLogs(ctx context.Context, idOrName string, tail int) (
 	return demuxDockerStream(raw), nil
 }
 
+// ContainerLogsSince returns container stdout/stderr logs since the given Unix timestamp (seconds).
+func (c *Client) ContainerLogsSince(ctx context.Context, idOrName string, sinceUnix int64) (string, error) {
+	path := fmt.Sprintf("/containers/%s/logs?stdout=true&stderr=true&since=%d&timestamps=true", url.PathEscape(idOrName), sinceUnix)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode >= 300 {
+		return "", fmt.Errorf("docker logs failed (%d): %s", resp.StatusCode, string(raw))
+	}
+	return demuxDockerStream(raw), nil
+}
+
 // ContainerStats fetches a single snapshot of container CPU and RAM usage.
 func (c *Client) ContainerStats(ctx context.Context, idOrName string) (*ContainerStats, error) {
 	var raw struct {

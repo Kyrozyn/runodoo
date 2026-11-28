@@ -241,6 +241,7 @@ type MonitoringConfig struct {
 	PrometheusContainer     string         `json:"prometheusContainer"`
 	GrafanaContainer        string         `json:"grafanaContainer"`
 	PGExporterContainer     string         `json:"pgExporterContainer"`
+	LokiContainer           string         `json:"lokiContainer"`
 	ExposePort              bool           `json:"exposePort"`
 	HTTPPort                int            `json:"httpPort"`
 	UseRootSubdomain        bool           `json:"useRootSubdomain"`

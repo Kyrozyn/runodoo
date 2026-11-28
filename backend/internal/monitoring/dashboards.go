@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func grafanaDatasourceYAML(promContainer string) string {
+func grafanaDatasourceYAML(promContainer, lokiContainer string) string {
 	return fmt.Sprintf(`apiVersion: 1
 datasources:
   - name: Prometheus
@@ -15,7 +15,54 @@ datasources:
     url: http://%s:9090
     isDefault: true
     editable: false
-`, promContainer)
+  - name: Loki
+    type: loki
+    uid: runodoo-loki
+    access: proxy
+    url: http://%s:3100
+    isDefault: false
+    editable: false
+`, promContainer, lokiContainer)
+}
+
+func lokiConfigYAML() string {
+	return `auth_enabled: false
+
+server:
+  http_listen_port: 3100
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+limits_config:
+  retention_period: 360h
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+`
 }
 
 func grafanaDashboardsProviderYAML(instanceName string) string {
@@ -502,6 +549,98 @@ func postgresqlDashboardJSON(instanceName string) string {
         { "expr": "rate(runodoo_pg_io_writes_total{instance=\"$instance\"}[1m])", "legendFormat": "{{container}} - Write IOPS", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "unit": "iops" } }
+    }
+  ]
+}
+`, "__INSTANCE__", instanceName)
+}
+
+func logsDashboardJSON(instanceName string) string {
+	return strings.ReplaceAll(`{
+  "uid": "runodoo-logs",
+  "title": "__INSTANCE__-RunOdoo - Odoo & PostgreSQL Logs",
+  "tags": ["runodoo", "logs", "loki"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "custom",
+        "query": "odoo,postgres",
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "search",
+        "label": "Search Regex",
+        "type": "textbox",
+        "current": { "text": "", "value": "" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Log Volume by Service (lines/min)",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 6 },
+      "datasource": { "type": "loki", "uid": "runodoo-loki" },
+      "targets": [
+        {
+          "expr": "sum by (service) (count_over_time({instance=\"__INSTANCE__\",service=~\"$service\"} |~ \"$search\" [1m]))",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 60 } } }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Errors, Warnings & Tracebacks (lines/min)",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 6 },
+      "datasource": { "type": "loki", "uid": "runodoo-loki" },
+      "targets": [
+        {
+          "expr": "sum by (service) (count_over_time({instance=\"__INSTANCE__\",service=~\"$service\"} |~ \"(?i)(error|traceback|exception|fatal|critical|warning)\" [1m]))",
+          "legendFormat": "{{service}} errors/warns",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "red" },
+          "custom": { "drawStyle": "bars", "fillOpacity": 70 }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "logs",
+      "title": "Odoo & PostgreSQL Live Logs",
+      "gridPos": { "x": 0, "y": 6, "w": 24, "h": 18 },
+      "datasource": { "type": "loki", "uid": "runodoo-loki" },
+      "targets": [
+        {
+          "expr": "{instance=\"__INSTANCE__\",service=~\"$service\"} |~ \"$search\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
     }
   ]
 }

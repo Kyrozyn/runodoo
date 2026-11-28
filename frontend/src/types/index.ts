@@ -135,6 +135,7 @@ export interface MonitoringConfig {
   prometheusContainer: string
   grafanaContainer: string
   pgExporterContainer: string
+  lokiContainer: string
   exposePort: boolean
   httpPort: number
   useRootSubdomain: boolean
@@ -159,6 +160,7 @@ export interface MonitoringStatus {
   prometheusStatus: string
   grafanaStatus: string
   pgExporterStatus: string
+  lokiStatus: string
   primaryUrl: string
   rootSubdomainUrl: string
   targets: ScrapeTarget[]

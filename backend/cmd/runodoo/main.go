@@ -56,9 +56,11 @@ func main() {
 	backupMgr := backup.NewManager(cfg, st, dc, dbMgr)
 	monMgr := monitoring.NewManager(cfg, st, dc, dbMgr, proxyMgr)
 
-	// Start scheduled backup cron runner
+	// Start scheduled backup cron runner & monitoring log shipper
 	backupMgr.StartScheduler()
 	defer backupMgr.StopScheduler()
+	monMgr.StartLogShipper()
+	defer monMgr.StopLogShipper()
 
 	// Best-effort network & nginx sync on startup
 	go func() {

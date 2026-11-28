@@ -441,7 +441,7 @@ export const api = {
     }),
   monitoringControl: (
     instanceId: string,
-    target: 'prometheus' | 'grafana' | 'pg_exporter' | 'all',
+    target: 'prometheus' | 'grafana' | 'pg_exporter' | 'loki' | 'all',
     action: 'start' | 'stop' | 'restart'
   ) =>
     request<MonitoringStatus>(`/api/instances/${instanceId}/monitoring/control`, {

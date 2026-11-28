@@ -24,9 +24,20 @@ Built with a **Go** backend (single lightweight static binary with minimal RAM f
   - Real-time deployment progress tracking with live container & image pull logs.
   - Interactive `odoo.conf` editor supporting both key-value rows and Bulk Edit mode with live configuration preview.
 
-- **Interactive Container Terminal & Live Logs**
+- **Interactive Container Terminal, Live Logs & Auto-Refresh Metrics**
   - Built-in **Web Terminal** (`xterm.js` over WebSocket PTY) inside each Odoo instance's detail view — interact directly with `bash`/`sh`, `odoo shell`, `python3`, `top`, `nano`/`vi`, and `Tab` autocomplete.
-  - Live container log viewer (`Logs` tab) and real-time CPU/RAM container stats.
+  - Live container log viewer (`Logs` tab) and 5-second visibility-aware auto-refreshing CPU/RAM container stats.
+  - Confirmation warning modals before stopping or restarting containers on the **Containers** page.
+
+- **Per-Instance Resource Limits & Host Disk Benchmark (`Resource Limits` tab)**
+  - Limit **CPU cores**, **RAM (MB)**, and **Disk Read/Write IOPS & MB/s** independently for each Odoo container and Dedicated PostgreSQL container.
+  - Built-in **Host Disk Benchmark** (Sequential Read/Write MB/s & Random 4K Read/Write IOPS) with per-metric percentage presets (`Unlimited`, `10%`, `25%`, `50%`, `75%`, `100%`) so you can mix limits per resource type.
+  - Live CPU/RAM updates via Docker API, host cgroup (`cpu`, `memory`, `io`/`blkio`) & block-device auto-detection, and automatic rollback if a limit cannot be applied.
+
+- **Per-Instance Advanced Monitoring (Prometheus, Loki & Grafana)**
+  - 1-click per-instance monitoring stack (`runodoo-prom-<name>`, `runodoo-loki-<name>`, `runodoo-grafana-<name>`, `runodoo-pgexp-<name>`) with live streaming installation logs and full uninstall (`Remove Stack`).
+  - Auto-provisioned **Odoo Apps Monitoring**, **PostgreSQL Database Monitoring**, and **Odoo & PostgreSQL Logs (Loki)** Grafana dashboards (`<instance>-RunOdoo`): CPU, RAM, Disk Read/Write MB/s & IOPS (`pg_stat_io` & cgroup `io.stat`), buffer hit vs. disk read, dead tuples / vacuum indicators, locks, temp disk spill, HTTP latency, active users, cron jobs, mail queue, and searchable log retention (15 days) automatically shipped from Odoo & PostgreSQL containers.
+  - Per-instance Grafana subdomain (`grafana.<instance>.<rootDomain>`), custom domains, Let's Encrypt SSL, port exposure, and Grafana admin account management.
 
 - **Domain Routing, Nginx Reverse Proxy & HTTPS Hardening**
   - Ready immediately on `http://<SERVER-IP>:3000` without requiring a domain upfront.
@@ -37,8 +48,9 @@ Built with a **Go** backend (single lightweight static binary with minimal RAM f
     - Option to **disable direct port 3000 access** so the RunOdoo control panel is reachable only through the configured Panel Domain.
     - Per-instance option to **disable Direct HTTP Port** (`0.0.0.0:<port> -> 8069`) so each Odoo app is accessible only through its domain via Nginx.
 
-- **Flexible PostgreSQL Management**
+- **Flexible PostgreSQL Management, Metrics & Tuning**
   - Choose between **Shared PostgreSQL** (RAM-efficient, isolated roles per instance) or a **Dedicated PostgreSQL Container** (full container isolation) when creating an instance.
+  - Card-grid **Databases** page with 2 tabs (**All Databases** and **By Instance**), plus a per-instance PostgreSQL detail view with 5s auto-refreshing metrics (CPU/RAM, active/idle connections, cache hit ratio, storage), **PostgreSQL Configuration Tuning** (`ALTER SYSTEM SET` + Reload/Restart), and maintenance (**VACUUM ANALYZE**, **Terminate Idle Connections**).
   - Create, initialize (admin user, language, country, demo data), duplicate (DB + filestore), and drop databases directly from the UI.
 
 - **Addons, Python Libs & Live CLI Module Upgrade**
@@ -46,9 +58,14 @@ Built with a **Go** backend (single lightweight static binary with minimal RAM f
   - Recursive `__manifest__.py` scanning and automatic `addons_path` generation per instance.
   - **Update Apps List**, **Clean Missing Apps** (checks `addons_path` vs. `ir.module.module` per database and removes stale uninstalled records with a detailed breakdown), **Python Libs** manager (`pip` inside `/var/lib/odoo/.local`), and **CLI Module Upgrade (`odoo -u`)** with **real-time streaming CLI output**.
 
-- **Backup & Restore (DB + Filestore `.zip`)**
-  - Standard Odoo `.zip` backups (`dump.sql` + `filestore/` + `manifest.json`), with 1-click download, restore, and upload-and-restore.
-  - **Scheduled Cron Backups** with configurable retention policies.
+- **Backup & Cross-Instance Restore (DB + Filestore `.zip`)**
+  - Standard Odoo `.zip` backups (`dump.sql` + `filestore/` + `manifest.json`), with 1-click download, **cross-instance restore** (choose any target instance & database name), and upload-and-restore.
+  - **Scheduled Cron Backups** with built-in schedule templates (15m, 30m, hourly, daily, weekly, monthly, yearly, or custom cron) and configurable retention policies.
+
+- **Control Panel Security & 2FA (`Settings → Security & 2FA`)**
+  - Mandatory default password change on first login (minimum 10 characters) and JWT session revocation (`TokenVersion` + **Revoke Other Sessions**).
+  - Optional **Two-Factor Authentication (2FA / TOTP)** with offline-generated QR code and Base32 setup key.
+  - Optional **Login Rate Limiter & IP Lockout** (disabled by default; configurable max attempts & lockout duration).
 
 ---
 
@@ -101,7 +118,8 @@ After the container is running, follow these steps in order:
    - Visit `http://<SERVER-IP>:3000` in your browser.
    - Sign in using the initial admin password (`runodoo123` by default, or the value you set in `RUNODOO_DEFAULT_PASSWORD`).
 2. **Change the Admin Password Immediately**
-   - Go to **Settings → Change Panel Admin Password** and set a strong password.
+   - On first login, you will be prompted to replace the default password with a strong password (minimum 10 characters).
+   - Optionally enable **2FA (Authenticator App)** and **Login Rate Limiter** under **Settings → Security & 2FA**.
 3. **Configure DNS & Enable HTTPS (Recommended)**
    - In your DNS provider, create a wildcard `A` record (`*.yourdomain.com`) and/or `A` record (`panel.yourdomain.com`) pointing to your server's public IP.
    - In **Dashboard** or **Settings**, enter your **Root Domain** (e.g., `yourdomain.com`) and **Let's Encrypt Email**, then click **Enable HTTPS (Certbot)**.
@@ -150,7 +168,7 @@ RunOdoo stores all persistent state, instance data, and proxy/SSL configs under 
 ```text
 /var/runodoo/
 ├── config/state.json       # Control panel settings, instances, addons, and backup metadata
-├── instances/<name>/       # Per-instance odoo.conf, filestore data, and extra-addons
+├── instances/<name>/       # Per-instance odoo.conf, filestore data, extra-addons, pgdata, and monitoring/
 ├── addons/                 # Cloned Git repositories and uploaded addon ZIPs
 ├── backups/                # Saved .zip backup archives
 ├── nginx/conf.d/           # Auto-generated Nginx virtual host configs
@@ -165,7 +183,7 @@ RunOdoo stores all persistent state, instance data, and proxy/SSL configs under 
 ```text
 ├── backend/                # Go 1.25 API server + pure-Go Docker Engine Unix-socket client + WebSocket PTY
 │   ├── cmd/runodoo/        # Application entrypoint (:3000)
-│   └── internal/           # api, auth, addons, backup, config, database, docker, models, odoo, proxy, store, system
+│   └── internal/           # api, auth, addons, backup, config, database, docker, models, monitoring, odoo, proxy, store, system
 ├── frontend/               # React 19 + TypeScript + Vite + Tailwind CSS v4 + xterm.js
 ├── Dockerfile              # Multi-stage build (Node -> Go -> Alpine runtime)
 ├── docker-compose.yml      # Docker Compose stack for RunOdoo

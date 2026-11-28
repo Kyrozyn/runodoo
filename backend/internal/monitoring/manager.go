@@ -25,18 +25,22 @@ const (
 	PromImage       = "prom/prometheus:latest"
 	GrafanaImage    = "grafana/grafana:latest"
 	PGExporterImage = "prometheuscommunity/postgres-exporter:latest"
+	LokiImage       = "grafana/loki:latest"
 )
 
 type Manager struct {
-	cfg    *config.Config
-	store  *store.Store
-	docker *docker.Client
-	db     *database.Manager
-	proxy  *proxy.Manager
+	cfg     *config.Config
+	store   *store.Store
+	docker  *docker.Client
+	db      *database.Manager
+	proxy   *proxy.Manager
+	shipper *logShipper
 }
 
 func NewManager(cfg *config.Config, st *store.Store, dc *docker.Client, db *database.Manager, px *proxy.Manager) *Manager {
-	return &Manager{cfg: cfg, store: st, docker: dc, db: db, proxy: px}
+	m := &Manager{cfg: cfg, store: st, docker: dc, db: db, proxy: px}
+	m.shipper = newLogShipper(m)
+	return m
 }
 
 type ScrapeTarget struct {
@@ -52,6 +56,7 @@ type MonitoringStatus struct {
 	PrometheusStatus string                  `json:"prometheusStatus"`
 	GrafanaStatus    string                  `json:"grafanaStatus"`
 	PGExporterStatus string                  `json:"pgExporterStatus"`
+	LokiStatus       string                  `json:"lokiStatus"`
 	PrimaryURL       string                  `json:"primaryUrl"`
 	RootSubdomainURL string                  `json:"rootSubdomainUrl"`
 	Targets          []ScrapeTarget          `json:"targets"`
@@ -77,7 +82,7 @@ type UpdateConfigRequest struct {
 	AllowAnonymous          *bool                  `json:"allowAnonymous,omitempty"`
 }
 
-func containerNamesFor(inst models.OdooInstance) (prom, grafana, pgExp string) {
+func containerNamesFor(inst models.OdooInstance) (prom, grafana, pgExp, loki string) {
 	prom = inst.Monitoring.PrometheusContainer
 	if prom == "" {
 		prom = "runodoo-prom-" + inst.Name
@@ -90,7 +95,11 @@ func containerNamesFor(inst models.OdooInstance) (prom, grafana, pgExp string) {
 	if pgExp == "" {
 		pgExp = "runodoo-pgexp-" + inst.Name
 	}
-	return prom, grafana, pgExp
+	loki = inst.Monitoring.LokiContainer
+	if loki == "" {
+		loki = "runodoo-loki-" + inst.Name
+	}
+	return prom, grafana, pgExp, loki
 }
 
 func (m *Manager) instMonDir(inst models.OdooInstance) string {
@@ -131,11 +140,12 @@ func (m *Manager) nextMonitoringPort() int {
 
 func (m *Manager) Status(ctx context.Context, inst models.OdooInstance) MonitoringStatus {
 	st := m.store.Get()
-	prom, grafana, pgExp := containerNamesFor(inst)
+	prom, grafana, pgExp, loki := containerNamesFor(inst)
 	mc := inst.Monitoring
 	mc.PrometheusContainer = prom
 	mc.GrafanaContainer = grafana
 	mc.PGExporterContainer = pgExp
+	mc.LokiContainer = loki
 	if mc.Domains == nil {
 		mc.Domains = []models.DomainConfig{}
 	}
@@ -151,6 +161,7 @@ func (m *Manager) Status(ctx context.Context, inst models.OdooInstance) Monitori
 		PrometheusStatus: m.inspectStatus(ctx, prom),
 		GrafanaStatus:    m.inspectStatus(ctx, grafana),
 		PGExporterStatus: m.inspectStatus(ctx, pgExp),
+		LokiStatus:       m.inspectStatus(ctx, loki),
 		Targets:          []ScrapeTarget{},
 	}
 
@@ -267,13 +278,14 @@ func (m *Manager) InstallWithLog(ctx context.Context, inst models.OdooInstance, 
 		domains = []models.DomainConfig{}
 	}
 
-	prom, grafana, pgExp := containerNamesFor(inst)
+	prom, grafana, pgExp, loki := containerNamesFor(inst)
 	updated, err := m.updateInstanceMonitoring(inst.ID, func(mc *models.MonitoringConfig) {
 		*mc = models.MonitoringConfig{
 			Installed:           true,
 			PrometheusContainer: prom,
 			GrafanaContainer:    grafana,
 			PGExporterContainer: pgExp,
+			LokiContainer:       loki,
 			ExposePort:          req.ExposePort,
 			HTTPPort:            port,
 			UseRootSubdomain:    req.UseRootSubdomain,
@@ -287,13 +299,13 @@ func (m *Manager) InstallWithLog(ctx context.Context, inst models.OdooInstance, 
 		return nil, err
 	}
 
-	logf("[2/6] Writing Prometheus, PG Exporter & Grafana provisioning configs...\n")
+	logf("[2/7] Writing Prometheus, PG Exporter, Loki & Grafana provisioning configs...\n")
 	if err := m.writeConfigFiles(updated); err != nil {
 		return nil, err
 	}
 
-	logf("[3/6] Checking & pulling Docker images...\n")
-	for _, img := range []string{PGExporterImage, PromImage, GrafanaImage} {
+	logf("[3/7] Checking & pulling Docker images...\n")
+	for _, img := range []string{PGExporterImage, PromImage, LokiImage, GrafanaImage} {
 		if m.docker.ImageExists(ctx, img) {
 			logf("  -> Image %s already cached locally.\n", img)
 			continue
@@ -306,15 +318,19 @@ func (m *Manager) InstallWithLog(ctx context.Context, inst models.OdooInstance, 
 		}
 	}
 
-	logf("[4/6] Creating & starting %s...\n", pgExp)
+	logf("[4/7] Creating & starting %s...\n", pgExp)
 	if err := m.recreatePGExporter(ctx, updated); err != nil {
 		return nil, err
 	}
-	logf("[5/6] Creating & starting %s...\n", prom)
+	logf("[5/7] Creating & starting %s...\n", prom)
 	if err := m.recreatePrometheus(ctx, updated); err != nil {
 		return nil, err
 	}
-	logf("[6/6] Creating & starting %s...\n", grafana)
+	logf("[6/7] Creating & starting %s...\n", loki)
+	if err := m.recreateLoki(ctx, updated); err != nil {
+		return nil, err
+	}
+	logf("[7/7] Creating & starting %s...\n", grafana)
 	if err := m.recreateGrafana(ctx, updated); err != nil {
 		return nil, err
 	}
@@ -391,7 +407,7 @@ func (m *Manager) UpdateGrafanaAccount(ctx context.Context, inst models.OdooInst
 		return nil, err
 	}
 
-	_, grafana, _ := containerNamesFor(updated)
+	_, grafana, _, _ := containerNamesFor(updated)
 	_, _, _ = m.docker.Exec(ctx, grafana, []string{
 		"grafana", "cli", "admin", "reset-admin-password", password,
 	}, nil)
@@ -434,7 +450,7 @@ func (m *Manager) IssueDomainSSL(ctx context.Context, inst models.OdooInstance, 
 }
 
 func (m *Manager) Control(ctx context.Context, inst models.OdooInstance, target, action string) error {
-	prom, grafana, pgExp := containerNamesFor(inst)
+	prom, grafana, pgExp, loki := containerNamesFor(inst)
 	var names []string
 	switch target {
 	case "prometheus":
@@ -443,8 +459,10 @@ func (m *Manager) Control(ctx context.Context, inst models.OdooInstance, target,
 		names = []string{grafana}
 	case "pg_exporter":
 		names = []string{pgExp}
+	case "loki":
+		names = []string{loki}
 	case "all":
-		names = []string{pgExp, prom, grafana}
+		names = []string{pgExp, prom, loki, grafana}
 	default:
 		return fmt.Errorf("unknown target %q", target)
 	}
@@ -474,8 +492,16 @@ func (m *Manager) Resync(ctx context.Context, inst models.OdooInstance) (*Monito
 	if err := m.writeConfigFiles(inst); err != nil {
 		return nil, err
 	}
-	prom, grafana, pgExp := containerNamesFor(inst)
+	prom, grafana, pgExp, loki := containerNamesFor(inst)
 	_ = m.docker.RestartContainer(ctx, pgExp, 10)
+	if m.inspectStatus(ctx, loki) == "not_found" {
+		if !m.docker.ImageExists(ctx, LokiImage) {
+			_ = m.docker.PullImage(ctx, LokiImage)
+		}
+		_ = m.recreateLoki(ctx, inst)
+	} else {
+		_ = m.docker.RestartContainer(ctx, loki, 10)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+prom+":9090/-/reload", nil)
 	if err == nil {
 		resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
@@ -491,10 +517,10 @@ func (m *Manager) Resync(ctx context.Context, inst models.OdooInstance) (*Monito
 	return &status, nil
 }
 
-// Uninstall stops and removes Prometheus, Grafana, and PG Exporter containers for an instance.
+// Uninstall stops and removes Prometheus, Grafana, Loki, and PG Exporter containers for an instance.
 func (m *Manager) Uninstall(ctx context.Context, inst models.OdooInstance, removeData bool) (*MonitoringStatus, error) {
-	prom, grafana, pgExp := containerNamesFor(inst)
-	for _, name := range []string{grafana, prom, pgExp} {
+	prom, grafana, pgExp, loki := containerNamesFor(inst)
+	for _, name := range []string{grafana, loki, prom, pgExp} {
 		_ = m.docker.StopContainer(ctx, name, 10)
 		_ = m.docker.RemoveContainer(ctx, name, true)
 	}
@@ -516,11 +542,13 @@ func (m *Manager) Uninstall(ctx context.Context, inst models.OdooInstance, remov
 
 func (m *Manager) writeConfigFiles(inst models.OdooInstance) error {
 	base := m.instMonDir(inst)
-	prom, _, _ := containerNamesFor(inst)
+	prom, _, _, loki := containerNamesFor(inst)
 	dirs := []string{
 		filepath.Join(base, "prometheus"),
 		filepath.Join(base, "prometheus-data"),
 		filepath.Join(base, "pg_exporter"),
+		filepath.Join(base, "loki"),
+		filepath.Join(base, "loki-data"),
 		filepath.Join(base, "grafana-data"),
 		filepath.Join(base, "grafana", "provisioning", "datasources"),
 		filepath.Join(base, "grafana", "provisioning", "dashboards"),
@@ -536,10 +564,12 @@ func (m *Manager) writeConfigFiles(inst models.OdooInstance) error {
 	files := map[string]string{
 		filepath.Join(base, "prometheus", "prometheus.yml"):                             m.buildPrometheusConfig(inst),
 		filepath.Join(base, "pg_exporter", "postgres_exporter.yml"):                   m.buildPGExporterConfig(inst),
-		filepath.Join(base, "grafana", "provisioning", "datasources", "prometheus.yml"): grafanaDatasourceYAML(prom),
+		filepath.Join(base, "loki", "loki-config.yml"):                                lokiConfigYAML(),
+		filepath.Join(base, "grafana", "provisioning", "datasources", "prometheus.yml"): grafanaDatasourceYAML(prom, loki),
 		filepath.Join(base, "grafana", "provisioning", "dashboards", "dashboards.yml"):  grafanaDashboardsProviderYAML(inst.Name),
 		filepath.Join(base, "grafana", "dashboards", "odoo-apps.json"):                odooAppsDashboardJSON(inst.Name),
 		filepath.Join(base, "grafana", "dashboards", "postgresql.json"):               postgresqlDashboardJSON(inst.Name),
+		filepath.Join(base, "grafana", "dashboards", "logs.json"):                     logsDashboardJSON(inst.Name),
 	}
 	for p, content := range files {
 		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
@@ -550,7 +580,7 @@ func (m *Manager) writeConfigFiles(inst models.OdooInstance) error {
 }
 
 func (m *Manager) buildPrometheusConfig(inst models.OdooInstance) string {
-	_, _, pgExp := containerNamesFor(inst)
+	_, _, pgExp, _ := containerNamesFor(inst)
 	return fmt.Sprintf(`global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -591,7 +621,7 @@ func (m *Manager) buildPGExporterConfig(inst models.OdooInstance) string {
 }
 
 func (m *Manager) recreatePGExporter(ctx context.Context, inst models.OdooInstance) error {
-	_, _, pgExp := containerNamesFor(inst)
+	_, _, pgExp, _ := containerNamesFor(inst)
 	_ = m.docker.StopContainer(ctx, pgExp, 10)
 	_ = m.docker.RemoveContainer(ctx, pgExp, true)
 
@@ -618,7 +648,7 @@ func (m *Manager) recreatePGExporter(ctx context.Context, inst models.OdooInstan
 }
 
 func (m *Manager) recreatePrometheus(ctx context.Context, inst models.OdooInstance) error {
-	prom, _, _ := containerNamesFor(inst)
+	prom, _, _, _ := containerNamesFor(inst)
 	_ = m.docker.StopContainer(ctx, prom, 10)
 	_ = m.docker.RemoveContainer(ctx, prom, true)
 
@@ -650,8 +680,36 @@ func (m *Manager) recreatePrometheus(ctx context.Context, inst models.OdooInstan
 	return m.docker.StartContainer(ctx, prom)
 }
 
+func (m *Manager) recreateLoki(ctx context.Context, inst models.OdooInstance) error {
+	_, _, _, loki := containerNamesFor(inst)
+	_ = m.docker.StopContainer(ctx, loki, 10)
+	_ = m.docker.RemoveContainer(ctx, loki, true)
+
+	hostMon := m.hostInstMonDir(inst)
+	_, err := m.docker.CreateContainer(ctx, docker.CreateContainerSpec{
+		Name:  loki,
+		Image: LokiImage,
+		Cmd:   []string{"-config.file=/etc/loki/local-config.yaml"},
+		Labels: map[string]string{
+			"runodoo.managed":  "true",
+			"runodoo.role":     "monitoring-loki",
+			"runodoo.instance": inst.Name,
+		},
+		Binds: []string{
+			fmt.Sprintf("%s/loki/loki-config.yml:/etc/loki/local-config.yaml:ro", hostMon),
+			fmt.Sprintf("%s/loki-data:/loki", hostMon),
+		},
+		Network:       m.cfg.DockerNetwork,
+		RestartPolicy: "unless-stopped",
+	})
+	if err != nil {
+		return err
+	}
+	return m.docker.StartContainer(ctx, loki)
+}
+
 func (m *Manager) recreateGrafana(ctx context.Context, inst models.OdooInstance) error {
-	_, grafana, _ := containerNamesFor(inst)
+	_, grafana, _, _ := containerNamesFor(inst)
 	_ = m.docker.StopContainer(ctx, grafana, 10)
 	_ = m.docker.RemoveContainer(ctx, grafana, true)
 
