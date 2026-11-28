@@ -118,7 +118,7 @@ func (s *logShipper) shipContainer(ctx context.Context, inst models.OdooInstance
 		return
 	}
 
-	var values [][2]string
+	byLevel := make(map[string][][2]string)
 	maxNano := last
 
 	for _, line := range strings.Split(raw, "\n") {
@@ -143,24 +143,29 @@ func (s *logShipper) shipContainer(ctx context.Context, inst models.OdooInstance
 			tsNano = maxNano + 1
 		}
 		maxNano = tsNano
-		values = append(values, [2]string{strconv.FormatInt(tsNano, 10), msg})
+		lvl := detectLogLevel(msg)
+		byLevel[lvl] = append(byLevel[lvl], [2]string{strconv.FormatInt(tsNano, 10), msg})
 	}
 
-	if len(values) == 0 {
+	if len(byLevel) == 0 {
 		return
 	}
 
-	payload := map[string]any{
-		"streams": []map[string]any{
-			{
-				"stream": map[string]string{
-					"instance":  inst.Name,
-					"container": containerName,
-					"service":   service,
-				},
-				"values": values,
+	streams := make([]map[string]any, 0, len(byLevel))
+	for lvl, vals := range byLevel {
+		streams = append(streams, map[string]any{
+			"stream": map[string]string{
+				"instance":  inst.Name,
+				"container": containerName,
+				"service":   service,
+				"level":     lvl,
 			},
-		},
+			"values": vals,
+		})
+	}
+
+	payload := map[string]any{
+		"streams": streams,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -184,5 +189,28 @@ func (s *logShipper) shipContainer(ctx context.Context, inst models.OdooInstance
 			s.lastNano[key] = maxNano
 		}
 		s.mu.Unlock()
+	}
+}
+
+func detectLogLevel(msg string) string {
+	upper := strings.ToUpper(msg)
+	switch {
+	case strings.Contains(upper, " ERROR ") ||
+		strings.Contains(upper, "ERROR:") ||
+		strings.Contains(upper, " CRITICAL ") ||
+		strings.Contains(upper, "FATAL:") ||
+		strings.Contains(upper, "PANIC:") ||
+		strings.Contains(upper, "TRACEBACK") ||
+		strings.Contains(upper, "EXCEPTION"):
+		return "error"
+	case strings.Contains(upper, " WARNING ") ||
+		strings.Contains(upper, "WARNING:") ||
+		strings.Contains(upper, " WARN "):
+		return "warning"
+	case strings.Contains(upper, " DEBUG ") ||
+		strings.Contains(upper, "DEBUG:"):
+		return "debug"
+	default:
+		return "info"
 	}
 }

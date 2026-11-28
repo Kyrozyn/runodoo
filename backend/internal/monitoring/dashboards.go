@@ -576,6 +576,15 @@ func logsDashboardJSON(instanceName string) string {
         "current": { "text": "All", "value": "$__all" }
       },
       {
+        "name": "level",
+        "label": "Level",
+        "type": "custom",
+        "query": "info,warning,error,debug",
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
         "name": "search",
         "label": "Search Regex",
         "type": "textbox",
@@ -587,13 +596,13 @@ func logsDashboardJSON(instanceName string) string {
     {
       "id": 1,
       "type": "timeseries",
-      "title": "Log Volume by Service (lines/min)",
+      "title": "Log Volume by Service & Level (lines/min)",
       "gridPos": { "x": 0, "y": 0, "w": 12, "h": 6 },
       "datasource": { "type": "loki", "uid": "runodoo-loki" },
       "targets": [
         {
-          "expr": "sum by (service) (count_over_time({instance=\"__INSTANCE__\",service=~\"$service\"} |~ \"$search\" [1m]))",
-          "legendFormat": "{{service}}",
+          "expr": "sum by (service, level) (count_over_time({instance=\"__INSTANCE__\",service=~\"$service\",level=~\"$level\"} |~ \"$search\" [1m]))",
+          "legendFormat": "{{service}} ({{level}})",
           "refId": "A"
         }
       ],
@@ -607,8 +616,8 @@ func logsDashboardJSON(instanceName string) string {
       "datasource": { "type": "loki", "uid": "runodoo-loki" },
       "targets": [
         {
-          "expr": "sum by (service) (count_over_time({instance=\"__INSTANCE__\",service=~\"$service\"} |~ \"(?i)(error|traceback|exception|fatal|critical|warning)\" [1m]))",
-          "legendFormat": "{{service}} errors/warns",
+          "expr": "sum by (service, level) (count_over_time({instance=\"__INSTANCE__\",service=~\"$service\",level=~\"error|warning\"} |~ \"$search\" [1m]))",
+          "legendFormat": "{{service}} ({{level}})",
           "refId": "A"
         }
       ],
@@ -627,7 +636,7 @@ func logsDashboardJSON(instanceName string) string {
       "datasource": { "type": "loki", "uid": "runodoo-loki" },
       "targets": [
         {
-          "expr": "{instance=\"__INSTANCE__\",service=~\"$service\"} |~ \"$search\"",
+          "expr": "{instance=\"__INSTANCE__\",service=~\"$service\",level=~\"$level\"} |~ \"$search\"",
           "refId": "A"
         }
       ],
