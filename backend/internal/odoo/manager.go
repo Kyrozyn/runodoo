@@ -1287,10 +1287,10 @@ func (m *Manager) deployContainerWithProgress(ctx context.Context, inst models.O
 		env = append(env, k+"="+v)
 	}
 
-	_, err := m.docker.CreateContainer(ctx, docker.CreateContainerSpec{
-		Name:  inst.ContainerName,
-		Image: inst.Image,
-		Env:   env,
+	spec := docker.CreateContainerSpec{
+		Name:          inst.ContainerName,
+		Image:         inst.Image,
+		Env:           env,
 		Labels: map[string]string{
 			"runodoo.managed":  "true",
 			"runodoo.role":     "odoo",
@@ -1301,7 +1301,15 @@ func (m *Manager) deployContainerWithProgress(ctx context.Context, inst models.O
 		PortMappings:  ports,
 		Network:       m.cfg.DockerNetwork,
 		RestartPolicy: "unless-stopped",
-	})
+	}
+	diskDev := strings.TrimSpace(inst.Resources.DiskDevice)
+	if diskDev == "" {
+		diskDev = system.DetectBlockDevice(m.cfg.DataDir)
+	}
+	ol := inst.Resources.OdooLimits
+	docker.ApplyContainerLimits(&spec, ol.CPUCores, ol.MemoryMB, ol.DiskReadIOPS, ol.DiskWriteIOPS, ol.DiskReadMBps, ol.DiskWriteMBps, diskDev)
+
+	_, err := m.docker.CreateContainer(ctx, spec)
 	if err != nil {
 		return err
 	}
@@ -1310,6 +1318,92 @@ func (m *Manager) deployContainerWithProgress(ctx context.Context, inst models.O
 	}
 	m.tracker.Log(inst.ID, fmt.Sprintf("Container '%s' started successfully", inst.ContainerName))
 	return nil
+}
+
+func hasDiskIOChanges(a, b models.ContainerLimits) bool {
+	return a.DiskReadIOPS != b.DiskReadIOPS ||
+		a.DiskWriteIOPS != b.DiskWriteIOPS ||
+		a.DiskReadMBps != b.DiskReadMBps ||
+		a.DiskWriteMBps != b.DiskWriteMBps
+}
+
+func hasAnyDiskIO(l models.ContainerLimits) bool {
+	return l.DiskReadIOPS > 0 || l.DiskWriteIOPS > 0 || l.DiskReadMBps > 0 || l.DiskWriteMBps > 0
+}
+
+// UpdateContainerLimits validates host cgroup/block-device support, persists limits, and applies them.
+func (m *Manager) UpdateContainerLimits(ctx context.Context, id string, odooLimits, dbLimits models.ContainerLimits, diskDevice string) (models.OdooInstance, error) {
+	diskDev := strings.TrimSpace(diskDevice)
+	if diskDev == "" {
+		diskDev = system.DetectBlockDevice(m.cfg.DataDir)
+	}
+	cpuOK, memOK, ioOK, _ := system.DetectCgroupCapabilities(m.cfg.DataDir)
+
+	if (odooLimits.CPUCores > 0 || dbLimits.CPUCores > 0) && !cpuOK {
+		return models.OdooInstance{}, fmt.Errorf("CPU limits cannot be applied: host Linux kernel does not expose the cgroup cpu controller")
+	}
+	if (odooLimits.MemoryMB > 0 || dbLimits.MemoryMB > 0) && !memOK {
+		return models.OdooInstance{}, fmt.Errorf("RAM limits cannot be applied: host Linux kernel does not expose the cgroup memory controller")
+	}
+	if hasAnyDiskIO(odooLimits) || hasAnyDiskIO(dbLimits) {
+		if diskDev == "" {
+			return models.OdooInstance{}, fmt.Errorf("disk I/O limits cannot be applied: failed to auto-detect host block device from /proc/mounts; please enter Host Block Device manually (e.g. /dev/vda)")
+		}
+		if !ioOK && strings.TrimSpace(diskDevice) == "" {
+			return models.OdooInstance{}, fmt.Errorf("disk I/O limits cannot be applied: host kernel does not expose the cgroup io/blkio controller")
+		}
+	}
+
+	var updated, prev models.OdooInstance
+	err := m.store.Update(func(st *models.State) error {
+		for i := range st.Instances {
+			if st.Instances[i].ID == id || st.Instances[i].Name == id {
+				prev = st.Instances[i]
+				st.Instances[i].Resources.OdooLimits = odooLimits
+				st.Instances[i].Resources.DBLimits = dbLimits
+				st.Instances[i].Resources.DiskDevice = strings.TrimSpace(diskDevice)
+				st.Instances[i].UpdatedAt = time.Now()
+				updated = st.Instances[i]
+				return nil
+			}
+		}
+		return fmt.Errorf("instance not found")
+	})
+	if err != nil {
+		return models.OdooInstance{}, err
+	}
+
+	rollback := func(applyErr error) (models.OdooInstance, error) {
+		_ = m.store.Update(func(st *models.State) error {
+			for i := range st.Instances {
+				if st.Instances[i].ID == updated.ID {
+					st.Instances[i].Resources = prev.Resources
+					return nil
+				}
+			}
+			return nil
+		})
+		return prev, applyErr
+	}
+
+	odooIOChanged := hasDiskIOChanges(prev.Resources.OdooLimits, odooLimits) || prev.Resources.DiskDevice != updated.Resources.DiskDevice
+	if odooIOChanged {
+		if err := m.deployContainerWithProgress(ctx, updated); err != nil {
+			return rollback(fmt.Errorf("failed applying Odoo container limits: %w", err))
+		}
+	} else if _, err := m.docker.InspectContainer(ctx, updated.ContainerName); err == nil {
+		if err := m.docker.UpdateContainerResources(ctx, updated.ContainerName, int64(odooLimits.CPUCores*1e9), odooLimits.MemoryMB*1024*1024); err != nil {
+			return rollback(fmt.Errorf("failed updating Odoo container CPU/RAM limits: %w", err))
+		}
+	}
+
+	if updated.DBMode == models.DBModeDedicated {
+		dbIOChanged := hasDiskIOChanges(prev.Resources.DBLimits, dbLimits) || prev.Resources.DiskDevice != updated.Resources.DiskDevice
+		if err := m.db.ApplyDedicatedLimits(ctx, updated, dbIOChanged); err != nil {
+			return rollback(fmt.Errorf("failed applying PostgreSQL container limits: %w", err))
+		}
+	}
+	return updated, nil
 }
 
 func resolveImage(version models.OdooVersion, customImage string) string {

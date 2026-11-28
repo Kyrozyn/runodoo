@@ -6,6 +6,7 @@ import type {
   BackupSchedule,
   ContainerStats,
   ContainerSummary,
+  ContainerLimits,
   DatabaseInfo,
   DeployProgress,
   OdooInstance,
@@ -219,6 +220,14 @@ export const api = {
       orderedKeys: string[]
       envVars: Record<string, string>
     }>(`/api/instances/${id}/conf`),
+  updateInstanceLimits: (
+    id: string,
+    payload: { odooLimits: ContainerLimits; dbLimits: ContainerLimits; diskDevice: string }
+  ) =>
+    request<OdooInstance>(`/api/instances/${id}/limits`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
   issueInstanceSsl: (id: string, domain: string, email?: string) =>
     request<{ ok: boolean; logs: string }>(`/api/instances/${id}/ssl`, {
       method: 'POST',

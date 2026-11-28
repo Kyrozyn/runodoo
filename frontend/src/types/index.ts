@@ -15,6 +15,15 @@ export interface DomainConfig {
   forceHttps: boolean
 }
 
+export interface ContainerLimits {
+  cpuCores: number
+  memoryMb: number
+  diskReadIops: number
+  diskWriteIops: number
+  diskReadMbps: number
+  diskWriteMbps: number
+}
+
 export interface ResourceConfig {
   workers: number
   limitMemorySoft: number
@@ -22,6 +31,9 @@ export interface ResourceConfig {
   limitTimeCpu: number
   limitTimeReal: number
   maxCronThreads: number
+  odooLimits?: ContainerLimits
+  dbLimits?: ContainerLimits
+  diskDevice?: string
 }
 
 export interface OdooInstance {
@@ -223,6 +235,11 @@ export interface SystemInfo {
   dockerConnected: boolean
   dockerVersion: string
   panelPort: string
+  blockDevice?: string
+  cpuLimitOk?: boolean
+  memoryLimitOk?: boolean
+  diskIoLimitOk?: boolean
+  limitNotes?: string
 }
 
 export interface ContainerSummary {

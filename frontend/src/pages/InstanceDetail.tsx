@@ -30,6 +30,7 @@ import { Modal, StatusBadge } from '../components/UI'
 import { CreateDatabaseModal } from '../components/CreateDatabaseModal'
 import { ContainerTerminal } from '../components/ContainerTerminal'
 import { MonitoringTab } from '../components/MonitoringTab'
+import { ContainerLimitsCard } from '../components/ContainerLimitsCard'
 
 type Tab = 'overview' | 'domains' | 'databases' | 'addons' | 'python' | 'config' | 'monitoring' | 'logs' | 'terminal'
 
@@ -870,6 +871,8 @@ export function InstanceDetail({
               <p className="text-sm text-slate-500">Start the container to view live CPU &amp; RAM metrics.</p>
             )}
           </div>
+
+          <ContainerLimitsCard instance={inst} onUpdated={loadInstance} notify={notify} />
         </div>
       )}
 
