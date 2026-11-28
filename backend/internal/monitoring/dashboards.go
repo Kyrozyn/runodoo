@@ -184,6 +184,30 @@ func odooAppsDashboardJSON(instanceName string) string {
       "gridPos": { "x": 12, "y": 20, "w": 12, "h": 7 },
       "datasource": { "type": "prometheus", "uid": "runodoo-prom" },
       "targets": [{ "expr": "runodoo_odoo_attachments_count{instance=\"$instance\"}", "legendFormat": "{{db}}", "refId": "A" }]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Odoo Container Disk Read/Write (Bytes/sec)",
+      "gridPos": { "x": 0, "y": 27, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "runodoo-prom" },
+      "targets": [
+        { "expr": "rate(runodoo_container_disk_read_bytes_total{instance=\"$instance\",role=\"odoo\"}[1m])", "legendFormat": "Read B/s", "refId": "A" },
+        { "expr": "rate(runodoo_container_disk_write_bytes_total{instance=\"$instance\",role=\"odoo\"}[1m])", "legendFormat": "Write B/s", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" } }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Odoo Container Disk IOPS (Read/Write)",
+      "gridPos": { "x": 12, "y": 27, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "runodoo-prom" },
+      "targets": [
+        { "expr": "rate(runodoo_container_disk_read_iops_total{instance=\"$instance\",role=\"odoo\"}[1m])", "legendFormat": "Read IOPS", "refId": "A" },
+        { "expr": "rate(runodoo_container_disk_write_iops_total{instance=\"$instance\",role=\"odoo\"}[1m])", "legendFormat": "Write IOPS", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "iops" } }
     }
   ]
 }
@@ -454,6 +478,30 @@ func postgresqlDashboardJSON(instanceName string) string {
         { "expr": "runodoo_pg_longest_query_seconds{instance=\"$instance\",db=~\"$datname\"}", "legendFormat": "{{db}} - Longest Query (s)", "refId": "A" },
         { "expr": "runodoo_pg_idle_in_tx_count{instance=\"$instance\",db=~\"$datname\"}", "legendFormat": "{{db}} - Idle in Transaction", "refId": "B" }
       ]
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "PostgreSQL Container Disk Read/Write (Bytes/sec)",
+      "gridPos": { "x": 0, "y": 59, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "runodoo-prom" },
+      "targets": [
+        { "expr": "rate(runodoo_container_disk_read_bytes_total{role=\"postgres\"}[1m])", "legendFormat": "{{container}} - Read B/s", "refId": "A" },
+        { "expr": "rate(runodoo_container_disk_write_bytes_total{role=\"postgres\"}[1m])", "legendFormat": "{{container}} - Write B/s", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "Bps" } }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "PostgreSQL Container Disk IOPS (Read/Write)",
+      "gridPos": { "x": 12, "y": 59, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "runodoo-prom" },
+      "targets": [
+        { "expr": "rate(runodoo_container_disk_read_iops_total{role=\"postgres\"}[1m])", "legendFormat": "{{container}} - Read IOPS", "refId": "A" },
+        { "expr": "rate(runodoo_container_disk_write_iops_total{role=\"postgres\"}[1m])", "legendFormat": "{{container}} - Write IOPS", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "iops" } }
     }
   ]
 }

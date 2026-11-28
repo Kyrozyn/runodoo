@@ -99,10 +99,14 @@ type ContainerInspect struct {
 }
 
 type ContainerStats struct {
-	CPUPercent    float64 `json:"cpuPercent"`
-	MemoryUsageMB float64 `json:"memoryUsageMb"`
-	MemoryLimitMB float64 `json:"memoryLimitMb"`
-	MemoryPercent float64 `json:"memoryPercent"`
+	CPUPercent     float64 `json:"cpuPercent"`
+	MemoryUsageMB  float64 `json:"memoryUsageMb"`
+	MemoryLimitMB  float64 `json:"memoryLimitMb"`
+	MemoryPercent  float64 `json:"memoryPercent"`
+	DiskReadBytes  uint64  `json:"diskReadBytes"`
+	DiskWriteBytes uint64  `json:"diskWriteBytes"`
+	DiskReadOps    uint64  `json:"diskReadOps"`
+	DiskWriteOps   uint64  `json:"diskWriteOps"`
 }
 
 type CreateContainerSpec struct {
@@ -396,6 +400,16 @@ func (c *Client) ContainerStats(ctx context.Context, idOrName string) (*Containe
 				Cache uint64 `json:"cache"`
 			} `json:"stats"`
 		} `json:"memory_stats"`
+		BlkioStats struct {
+			IOServiceBytesRecursive []struct {
+				Op    string `json:"op"`
+				Value uint64 `json:"value"`
+			} `json:"io_service_bytes_recursive"`
+			IOServicedRecursive []struct {
+				Op    string `json:"op"`
+				Value uint64 `json:"value"`
+			} `json:"io_serviced_recursive"`
+		} `json:"blkio_stats"`
 	}
 
 	if err := c.doJSON(ctx, http.MethodGet, "/containers/"+url.PathEscape(idOrName)+"/stats?stream=false", nil, &raw); err != nil {
@@ -423,11 +437,31 @@ func (c *Client) ContainerStats(ctx context.Context, idOrName string) (*Containe
 		memPct = float64(memUsage) / float64(memLimit) * 100.0
 	}
 
+	var diskReadBytes, diskWriteBytes, diskReadOps, diskWriteOps uint64
+	for _, entry := range raw.BlkioStats.IOServiceBytesRecursive {
+		if strings.EqualFold(entry.Op, "read") {
+			diskReadBytes += entry.Value
+		} else if strings.EqualFold(entry.Op, "write") {
+			diskWriteBytes += entry.Value
+		}
+	}
+	for _, entry := range raw.BlkioStats.IOServicedRecursive {
+		if strings.EqualFold(entry.Op, "read") {
+			diskReadOps += entry.Value
+		} else if strings.EqualFold(entry.Op, "write") {
+			diskWriteOps += entry.Value
+		}
+	}
+
 	return &ContainerStats{
-		CPUPercent:    float64(int(cpuPct*100)) / 100,
-		MemoryUsageMB: float64(int(float64(memUsage)/(1024*1024)*10)) / 10,
-		MemoryLimitMB: float64(int(float64(memLimit)/(1024*1024)*10)) / 10,
-		MemoryPercent: float64(int(memPct*100)) / 100,
+		CPUPercent:     float64(int(cpuPct*100)) / 100,
+		MemoryUsageMB:  float64(int(float64(memUsage)/(1024*1024)*10)) / 10,
+		MemoryLimitMB:  float64(int(float64(memLimit)/(1024*1024)*10)) / 10,
+		MemoryPercent:  float64(int(memPct*100)) / 100,
+		DiskReadBytes:  diskReadBytes,
+		DiskWriteBytes: diskWriteBytes,
+		DiskReadOps:    diskReadOps,
+		DiskWriteOps:   diskWriteOps,
 	}, nil
 }
 

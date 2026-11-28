@@ -709,6 +709,10 @@ func (m *Manager) RenderMetrics(ctx context.Context, instanceFilter string) stri
 	sb.WriteString("# TYPE runodoo_container_memory_usage_bytes gauge\n")
 	sb.WriteString("# TYPE runodoo_container_memory_limit_bytes gauge\n")
 	sb.WriteString("# TYPE runodoo_container_memory_percent gauge\n")
+	sb.WriteString("# TYPE runodoo_container_disk_read_bytes_total counter\n")
+	sb.WriteString("# TYPE runodoo_container_disk_write_bytes_total counter\n")
+	sb.WriteString("# TYPE runodoo_container_disk_read_iops_total counter\n")
+	sb.WriteString("# TYPE runodoo_container_disk_write_iops_total counter\n")
 	sb.WriteString("# TYPE runodoo_odoo_http_up gauge\n")
 	sb.WriteString("# TYPE runodoo_odoo_http_response_seconds gauge\n")
 	sb.WriteString("# TYPE runodoo_odoo_workers_configured gauge\n")
@@ -746,6 +750,10 @@ func (m *Manager) RenderMetrics(ctx context.Context, instanceFilter string) stri
 				sb.WriteString(fmt.Sprintf("runodoo_container_memory_usage_bytes{instance=%q,container=%q,role=\"odoo\"} %.0f\n", inst.Name, inst.ContainerName, stats.MemoryUsageMB*1024*1024))
 				sb.WriteString(fmt.Sprintf("runodoo_container_memory_limit_bytes{instance=%q,container=%q,role=\"odoo\"} %.0f\n", inst.Name, inst.ContainerName, stats.MemoryLimitMB*1024*1024))
 				sb.WriteString(fmt.Sprintf("runodoo_container_memory_percent{instance=%q,container=%q,role=\"odoo\"} %.4f\n", inst.Name, inst.ContainerName, stats.MemoryPercent))
+				sb.WriteString(fmt.Sprintf("runodoo_container_disk_read_bytes_total{instance=%q,container=%q,role=\"odoo\"} %d\n", inst.Name, inst.ContainerName, stats.DiskReadBytes))
+				sb.WriteString(fmt.Sprintf("runodoo_container_disk_write_bytes_total{instance=%q,container=%q,role=\"odoo\"} %d\n", inst.Name, inst.ContainerName, stats.DiskWriteBytes))
+				sb.WriteString(fmt.Sprintf("runodoo_container_disk_read_iops_total{instance=%q,container=%q,role=\"odoo\"} %d\n", inst.Name, inst.ContainerName, stats.DiskReadOps))
+				sb.WriteString(fmt.Sprintf("runodoo_container_disk_write_iops_total{instance=%q,container=%q,role=\"odoo\"} %d\n", inst.Name, inst.ContainerName, stats.DiskWriteOps))
 			}
 		}
 
@@ -762,6 +770,10 @@ func (m *Manager) RenderMetrics(ctx context.Context, instanceFilter string) stri
 					sb.WriteString(fmt.Sprintf("runodoo_container_memory_usage_bytes{instance=%q,container=%q,role=\"postgres\"} %.0f\n", inst.Name, inst.DBContainerName, stats.MemoryUsageMB*1024*1024))
 					sb.WriteString(fmt.Sprintf("runodoo_container_memory_limit_bytes{instance=%q,container=%q,role=\"postgres\"} %.0f\n", inst.Name, inst.DBContainerName, stats.MemoryLimitMB*1024*1024))
 					sb.WriteString(fmt.Sprintf("runodoo_container_memory_percent{instance=%q,container=%q,role=\"postgres\"} %.4f\n", inst.Name, inst.DBContainerName, stats.MemoryPercent))
+					sb.WriteString(fmt.Sprintf("runodoo_container_disk_read_bytes_total{instance=%q,container=%q,role=\"postgres\"} %d\n", inst.Name, inst.DBContainerName, stats.DiskReadBytes))
+					sb.WriteString(fmt.Sprintf("runodoo_container_disk_write_bytes_total{instance=%q,container=%q,role=\"postgres\"} %d\n", inst.Name, inst.DBContainerName, stats.DiskWriteBytes))
+					sb.WriteString(fmt.Sprintf("runodoo_container_disk_read_iops_total{instance=%q,container=%q,role=\"postgres\"} %d\n", inst.Name, inst.DBContainerName, stats.DiskReadOps))
+					sb.WriteString(fmt.Sprintf("runodoo_container_disk_write_iops_total{instance=%q,container=%q,role=\"postgres\"} %d\n", inst.Name, inst.DBContainerName, stats.DiskWriteOps))
 				}
 			}
 		}
