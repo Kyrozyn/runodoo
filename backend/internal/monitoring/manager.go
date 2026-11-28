@@ -754,8 +754,12 @@ func (m *Manager) RenderMetrics(ctx context.Context, instanceFilter string) stri
 				sb.WriteString(fmt.Sprintf("runodoo_container_memory_percent{instance=%q,container=%q,role=\"odoo\"} %.4f\n", inst.Name, inst.ContainerName, stats.MemoryPercent))
 				sb.WriteString(fmt.Sprintf("runodoo_container_disk_read_bytes_total{instance=%q,container=%q,role=\"odoo\"} %d\n", inst.Name, inst.ContainerName, stats.DiskReadBytes))
 				sb.WriteString(fmt.Sprintf("runodoo_container_disk_write_bytes_total{instance=%q,container=%q,role=\"odoo\"} %d\n", inst.Name, inst.ContainerName, stats.DiskWriteBytes))
-				sb.WriteString(fmt.Sprintf("runodoo_container_disk_read_iops_total{instance=%q,container=%q,role=\"odoo\"} %d\n", inst.Name, inst.ContainerName, stats.DiskReadOps))
-				sb.WriteString(fmt.Sprintf("runodoo_container_disk_write_iops_total{instance=%q,container=%q,role=\"odoo\"} %d\n", inst.Name, inst.ContainerName, stats.DiskWriteOps))
+				readOps, writeOps := stats.DiskReadOps, stats.DiskWriteOps
+				if readOps == 0 && writeOps == 0 && (stats.DiskReadBytes > 0 || stats.DiskWriteBytes > 0) {
+					readOps, writeOps = m.docker.ReadContainerCgroupIOPS(ctx, inst.ContainerName)
+				}
+				sb.WriteString(fmt.Sprintf("runodoo_container_disk_read_iops_total{instance=%q,container=%q,role=\"odoo\"} %d\n", inst.Name, inst.ContainerName, readOps))
+				sb.WriteString(fmt.Sprintf("runodoo_container_disk_write_iops_total{instance=%q,container=%q,role=\"odoo\"} %d\n", inst.Name, inst.ContainerName, writeOps))
 			}
 		}
 
